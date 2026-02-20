@@ -55,13 +55,13 @@ cd umaumafancount-mp4tocsv
 .
 .
 ```
-* `pip install nv`を実行する
+* `pip install uv`を実行する
 * FullHDのモニターに全画面表示で表示する
 * 以下の画像を参考にサークル画面でメンバー全員が映るように動画を撮影する。※マウスカーソルがメンバー名・人数に映ってしまうと文字認識できないためスクロールバーに合わせること
 <img src="./docs/images/circle.png">
 
 * 2で撮影した動画を`input/`に格納する。
-* `nv run main.py <格納した動画ファイル名>`を実行する
+* `uv run main.py <格納した動画ファイル名>`を実行する
 <img src="./docs/images/run.png">
 * `output/output.json`に以下のような形で出力される
 ```
