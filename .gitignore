@@ -9,8 +9,8 @@ output/**
 !output/**/
 !output/**/.gitkeep
 input/**
-!input/menberReplace.json
-!input/menberList.txt
+!input/memberReplace.json
+!input/memberList.txt
 !input/.gitkeep
 
 # Virtual environments

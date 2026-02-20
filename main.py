@@ -44,7 +44,8 @@ def cleanup(base_path, debug_path):
     os.makedirs(debug_path, exist_ok=True)
     os.makedirs(debug_path/ "text", exist_ok=True)
 def save_all_frames(video_path, dir_path, basename, ext='png'):
-    cap = cv2.VideoCapture(video_path)
+    input_path = Path("./input/")
+    cap = cv2.VideoCapture(input_path / video_path)
 
     if not cap.isOpened():
         return
@@ -101,7 +102,7 @@ def to_gray(path, dir_path, basename,ext='png'):
     cv2.imwrite(f'{base_path}.{ext}', im_gray)
     return f'{base_path}.{ext}'
 
-def get_fan_count(texts, menber, fans):
+def get_fan_count(texts, member, fans):
     
 
 
@@ -116,7 +117,7 @@ def get_fan_count(texts, menber, fans):
 
     fancounts = {}
     for text in texts:
-        if menber in text:
+        if member in text:
             match = pattern.search(text)
             if match:
                 value = match.group()              # '3,249,444,186'
@@ -184,19 +185,19 @@ if __name__ == "__main__":
         f.write(text)
         f.close()
         texts.append(text)
-    f = open('input/menberList.txt', 'r', encoding='utf-8')
-    menber_list = [line.strip() for line in f]
-    f = open('input/menberReplace.json', 'r', encoding='utf-8')
-    menber_replace = json.load(f)
+    f = open('input/memberList.txt', 'r', encoding='utf-8')
+    member_list = [line.strip() for line in f]
+    f = open('input/memberReplace.json', 'r', encoding='utf-8')
+    member_replace = json.load(f)
     f.close()
     print("===Text Converting...===")
     for i, text in enumerate(texts):
-        for menber in menber_list:
-            if menber in menber_replace.keys():
-                for repname in menber_replace[menber]:
-                    texts[i] = texts[i].replace(repname, menber)
-            if menber in text:
-                texts[i] = texts[i].replace(menber, f"\n{menber} ")
+        for member in member_list:
+            if member in member_replace.keys():
+                for repname in member_replace[member]:
+                    texts[i] = texts[i].replace(repname, member)
+            if member in text:
+                texts[i] = texts[i].replace(member, f"\n{member} ")
     texts = "\n".join(texts).split("\n")
     join_text = "\n".join(texts)
     f = open(debug_path / "text/output.txt", 'w', encoding='utf-8')
@@ -205,13 +206,13 @@ if __name__ == "__main__":
     print("=== Extracting fan count... ===")
     fan_counts = {}
     fans = []
-    for i, menber in enumerate(tqdm(menber_list)):
-        fan_count = get_fan_count(texts, menber, fans)
+    for i, member in enumerate(tqdm(member_list)):
+        fan_count = get_fan_count(texts, member, fans)
         if fan_count is not None:
-            fan_counts[menber] = fan_count
+            fan_counts[member] = fan_count
             fans.append(fan_count)
         else:
-            fan_counts[menber] = 0
+            fan_counts[member] = 0
 
     
     json.dump(fan_counts, open('output/output.json', 'w', encoding='UTF-8'), ensure_ascii=False, indent=4)
