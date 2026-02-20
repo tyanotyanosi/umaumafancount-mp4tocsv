@@ -13,7 +13,7 @@
 
 ## インストール手順
 
-### pythonのインストール(Copilotが作成)
+### pythonのインストール
 
 1. Microsoft Store を開きます
 2. 検索欄に「Python 3.12」と入力し、Microsoft 発行の Python を **入手（インストール）**します
