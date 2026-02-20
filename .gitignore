@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+output/**
+!output/**/
+!output/**/.gitkeep
+input/**
+!input/menberReplace.json
+!input/menberList.txt
+!input/.gitkeep
+
+# Virtual environments
+.venv
