@@ -10,6 +10,7 @@
 
 * Windows11
 * python 3.13
+* FullHDのモニターを持っている
 
 ## インストール手順
 
@@ -55,6 +56,7 @@ cd umaumafancount-mp4tocsv
 .
 ```
 * `pip install nv`を実行する
+* FullHDのモニターに全画面表示で表示する
 * 以下の画像を参考にサークル画面でメンバー全員が映るように動画を撮影する。※マウスカーソルがメンバー名・人数に映ってしまうと文字認識できないためスクロールバーに合わせること
 <img src="./docs/images/circle.png">
 
