@@ -36,8 +36,8 @@ cd umaumafancount-mp4tocsv
 
 #### ZIPでダウンロード
 
-1. umaumafancount-mp4tocsv右上の「Code」をクリック
-2. 「Download ZIP」をクリック
+1. umaumafancount-mp4tocsv右側の「Releases」にある「Latest」タグが付いているものをクリック
+2. 「Source code(ZIP)」をクリック
 3. ローカルに保存されるので解凍して好きなところに置く
 
 ## 利用手順
