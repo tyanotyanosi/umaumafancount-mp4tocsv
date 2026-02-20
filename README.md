@@ -62,6 +62,7 @@ cd umaumafancount-mp4tocsv
 
 * 2で撮影した動画を`input/`に格納する。
 * `nv run main.py <格納した動画ファイル名>`を実行する
+<img src="./docs/images/run.png">
 * `output/output.json`に以下のような形で出力される
 ```
 {
