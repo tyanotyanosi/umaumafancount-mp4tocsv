@@ -12,6 +12,11 @@ input/**
 !input/memberReplace.json
 !input/memberList.txt
 !input/.gitkeep
-
 # Virtual environments
 .venv
+.coverage
+
+# AI関連
+opencode.json
+AGENTS.md
+docs/

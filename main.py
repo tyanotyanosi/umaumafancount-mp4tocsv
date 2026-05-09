@@ -29,10 +29,36 @@ from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Umamusume Pretty Derby の動画からファン数を抽出するツール(WinRt OCR使用)")
-    p.add_argument("video", type=str, help="入力動画のファイル名(例：UmamusumePrettyDerby_Jpn*.mp4)")
+    p.add_argument("video", nargs="?", type=str, default=None,
+                   help="入力動画のファイル名(例：UmamusumePrettyDerby_Jpn*.mp4)。省略時はGUIファイル選択ダイアログを開きます。")
+    p.add_argument("--gui", action="store_true", help="GUIファイル選択ダイアログを開く")
     p.add_argument("--debug", action="store_true", help="中間ファイルを削除せずに残す")
     p.add_argument("--img-scale", type=str, default=None, help="グレースケールで文字認識する場合は'gray'を指定")
     return p.parse_args()
+
+
+def select_video_gui() -> str | None:
+    """Windows標準のファイル選択ダイアログを開き、選択された動画ファイルの絶対パスを返す。
+    キャンセル時は None を返す。"""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        print("エラー: tkinter が利用できません。Pythonインストール時に tcl/tk が有効か確認してください。")
+        return None
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+
+    file_path = filedialog.askopenfilename(
+        title="解析する動画ファイルを選択してください",
+        initialdir=os.path.abspath("input"),
+        filetypes=[("MP4 動画ファイル", "*.mp4"), ("すべてのファイル", "*.*")]
+    )
+
+    root.destroy()
+    return file_path if file_path else None
 
 
 def cleanup(base_path, debug_path):
@@ -44,8 +70,11 @@ def cleanup(base_path, debug_path):
     os.makedirs(debug_path, exist_ok=True)
     os.makedirs(debug_path/ "text", exist_ok=True)
 def save_all_frames(video_path, dir_path, basename, ext='png'):
-    input_path = Path("./input/")
-    cap = cv2.VideoCapture(input_path / video_path)
+    video_path = Path(video_path)
+    if video_path.is_absolute():
+        cap = cv2.VideoCapture(str(video_path))
+    else:
+        cap = cv2.VideoCapture(str(Path("./input/") / video_path))
 
     if not cap.isOpened():
         return
@@ -135,11 +164,24 @@ def get_fan_count(texts, member, fans):
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # --- GUI/CLI 分岐 ---
+    if args.gui or args.video is None:
+        if args.video is None and not args.gui:
+            print("動画ファイルが指定されていないため、ファイル選択ダイアログを開きます。")
+        selected = select_video_gui()
+        if selected is None:
+            print("ファイルが選択されませんでした。終了します。")
+            sys.exit(1)
+        video_path = Path(selected)
+    else:
+        video_path = Path(args.video)
+    # --------------------
+
     base_path = Path("output/")
     debug_path = base_path / "debug"
     print("=== CleanUP ===")
     cleanup = cleanup(base_path, debug_path)
-    video_path = Path(args.video)
     print(f"=== Input video: {video_path} ===")
     print("Parse video and save frames...")
     
