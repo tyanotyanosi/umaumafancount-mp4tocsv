@@ -430,19 +430,40 @@ class AppWindow:
         self.txt_status.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scr.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # --- 下部：結果パネル（Treeview）---
+        # --- 下部：結果パネル（Treeview / JSON Text の切り替え表示）---
         result_frame = tk.Frame(self.root, padx=10, pady=5)
         result_frame.pack(fill=tk.X)
 
+        # ラジオボタン行
+        radio_frame = tk.Frame(result_frame)
+        radio_frame.pack(side=tk.LEFT)
+
         self.btn_copy = tk.Button(
-            result_frame, text="📋 クリップボードにコピー",
-            font=("Meiryo UI", 9), width=20, command=self._on_copy_results
+            radio_frame, text="📋 クリップボードにコピー",
+            font=("Meiryo UI", 9), width=18, command=self._on_copy_results
         )
-        self.btn_copy.pack(side=tk.LEFT)
+        self.btn_copy.grid(row=0, column=0)
 
-        tv_frame = tk.Frame(result_frame)
-        tv_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        self.var_display_mode = tk.IntVar(value=0)  # 0: テーブル形式, 1: JSON形式
 
+        rb_table = tk.Radiobutton(
+            radio_frame, text="テーブル", variable=self.var_display_mode, value=0,
+            font=("Meiryo UI", 9), command=self._update_display
+        )
+        rb_table.grid(row=1, column=0)
+
+        rb_json = tk.Radiobutton(
+            radio_frame, text="JSON", variable=self.var_display_mode, value=1,
+            font=("Meiryo UI", 9), command=self._update_display
+        )
+        rb_json.grid(row=2, column=0)
+
+        # --- 結果表示エリア（切り替え用 Frame）---
+        self.result_container = tk.Frame(result_frame)
+        self.result_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # Treeview（テーブル形式用）
+        tv_frame = tk.Frame(self.result_container)
         columns = ("メンバー名", "ファン数")
         self.tv_results = ttk.Treeview(
             tv_frame, columns=columns, show="headings", height=6
@@ -456,6 +477,22 @@ class AppWindow:
         self.tv_results.configure(yscrollcommand=tv_scr.set)
         self.tv_results.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tv_scr.pack(side=tk.RIGHT, fill=tk.Y)
+        self.treeview_widget = tv_frame
+
+        # Text（JSON形式用）
+        json_frame = tk.Frame(self.result_container)
+        self.txt_json = tk.Text(
+            json_frame, height=6, width=78,
+            font=("Consolas", 10), state=tk.DISABLED
+        )
+        json_scr = tk.Scrollbar(json_frame, orient=tk.VERTICAL, command=self.txt_json.yview)
+        self.txt_json.configure(yscrollcommand=json_scr.set)
+        self.txt_json.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        json_scr.pack(side=tk.RIGHT, fill=tk.Y)
+        self.json_widget = json_frame
+
+        # 初期表示：テーブル形式を表示
+        self.treeview_widget.pack(fill=tk.BOTH, expand=True)
 
         # --- クロージャ処理 ---
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -469,6 +506,17 @@ class AppWindow:
         self.txt_status.see(tk.END)
         self.txt_status.yview_moveto(1.0)
         self.txt_status.configure(state=tk.DISABLED)
+
+    def _update_display(self):
+        """ラジオボタンの選択に応じて表示を切り替え"""
+        mode = self.var_display_mode.get()
+        # 両方のウィジェットを非表示にし、選択された方を再表示
+        self.treeview_widget.pack_forget()
+        self.json_widget.pack_forget()
+        if mode == 0:
+            self.treeview_widget.pack(in_=self.result_container, fill=tk.BOTH, expand=True)
+        else:
+            self.json_widget.pack(in_=self.result_container, fill=tk.BOTH, expand=True)
 
     def _on_select_video(self):
         """「動画ファイルを選択」ボタンのイベントハンドラ"""
@@ -497,6 +545,10 @@ class AppWindow:
         # Treeview クリア
         for item in self.tv_results.get_children():
             self.tv_results.delete(item)
+        # JSON Text クリア
+        self.txt_json.configure(state=tk.NORMAL)
+        self.txt_json.delete(1.0, tk.END)
+        self.txt_json.configure(state=tk.DISABLED)
 
         # ワーカースレッド起動
         config = PipelineConfig(
@@ -527,6 +579,14 @@ class AppWindow:
                     for member, count in data.fan_counts.items():
                         formatted_count = f"{count:,}" if count > 0 else "非検出"
                         self.tv_results.insert("", tk.END, values=(member, formatted_count))
+                    # JSON Text にフォーマット済みJSONを設定
+                    json_text = json.dumps(data.fan_counts, ensure_ascii=False, indent=4)
+                    self.txt_json.configure(state=tk.NORMAL)
+                    self.txt_json.delete(1.0, tk.END)
+                    self.txt_json.insert(tk.END, json_text)
+                    self.txt_json.configure(state=tk.DISABLED)
+                    # 現在の表示モードに合わせてウィジェットを切り替え
+                    self._update_display()
 
                 elif msg_type == "error":
                     self._add_status(f"エラーが発生しました: {data}")
@@ -548,17 +608,25 @@ class AppWindow:
             self.root.after(100, self._check_queue)
 
     def _on_copy_results(self):
-        """Treeviewの内容をクリップボードにコピー"""
-        lines = []
-        for item in self.tv_results.get_children():
-            values = self.tv_results.item(item)["values"]
-            if len(values) == 2:
-                lines.append(f"{values[0]}\t{values[1]}")
+        """現在の表示モードに応じてクリップボードにコピー"""
+        mode = self.var_display_mode.get()
 
-        if not lines:
-            return
+        if mode == 0:
+            # テーブル形式：Treeview からタブ区切りテキストを生成
+            lines = []
+            for item in self.tv_results.get_children():
+                values = self.tv_results.item(item)["values"]
+                if len(values) == 2:
+                    lines.append(f"{values[0]}\t{values[1]}")
+            if not lines:
+                return
+            text = "\n".join(lines)
+        else:
+            # JSON形式：Text ウィジェットの内容をそのままコピー
+            text = self.txt_json.get(1.0, tk.END).strip()
+            if not text:
+                return
 
-        text = "\n".join(lines)
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
 
