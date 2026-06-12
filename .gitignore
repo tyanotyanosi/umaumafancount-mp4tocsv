@@ -20,3 +20,4 @@ input/**
 opencode.json
 AGENTS.md
 docs/
+./config/
