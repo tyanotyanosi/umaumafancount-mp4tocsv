@@ -1,0 +1,59 @@
+name: Create Release
+
+# v* というパターンにマッチするタグが push された時に実行
+on:
+  push:
+    tags:
+      - 'v*'
+
+# リリースを作成するために書き込み権限が必要
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. リポジトリのコードをチェックアウト
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. リリースパッケージを作成するためのファイルを選別して圧縮
+      # 実行に不要なテストコード、ドキュメント、デバッグ用ディレクトリは除外
+      - name: Package Application
+        run: |
+          # リリース用の一時ディレクトリを作成
+          mkdir release_dist
+          
+          # 実行に必要なファイル・ディレクトリをコピー
+          # ※ 設計書に基づき、main.py, src/ ディレクトリ, pyproject.toml, uv.lock, README.md を対象とする
+          cp main.py release_dist/
+          cp -r src/ release_dist/
+          cp pyproject.toml release_dist/
+          # uv を使用している場合、環境再現性のために uv.lock も含める
+          [ -f uv.lock ] && cp uv.lock release_dist/ || echo "uv.lock not found, skipping..."
+          cp README.md release_dist/
+          
+          # 圧縮
+          cd release_dist
+          zip -r ../release_package.zip .
+          cd ..
+          
+          echo "Package created: release_package.zip"
+
+      # 3. GitHub Release の作成とアーティファクトのアップロード
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_package.zip
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "### ✅ Release Process Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact:** release_package.zip" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Created and uploaded successfully" >> $GITHUB_STEP_SUMMARY
