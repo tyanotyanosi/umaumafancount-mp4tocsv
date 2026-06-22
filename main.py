@@ -42,6 +42,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--img-scale", type=str, default=None,
         help="グレースケールで文字認識する場合は'gray'を指定"
     )
+    parser.add_argument(
+        "--mode", type=str, default="ocr", choices=["ocr", "vlm"],
+        help="認識モードを指定 (デフォルト: ocr)"
+    )
     return parser
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -53,16 +57,22 @@ def main():
 
     # バッチモード：動画パスがCLIで指定された場合、GUIを開かずに直接実行
     if args.video is not None:
+        vlm_config = None
+        if args.mode == "vlm":
+            from src.domain.models import VLMConfig
+            vlm_config = VLMConfig(enabled=True, debug=args.debug)
         config = PipelineConfig(
             video_path=Path(args.video),
             debug=args.debug,
-            img_scale=args.img_scale
+            img_scale=args.img_scale,
+            mode=args.mode,
+            vlm_config=vlm_config
         )
         _run_batch_mode(config)
 
     # GUI モード：動画パスなし、または --gui フラグ指定時
     else:
-        app = AppWindow(debug=args.debug, img_scale=args.img_scale)
+        app = AppWindow(debug=args.debug, img_scale=args.img_scale, mode=args.mode)
         app.run()
 
 if __name__ == "__main__":

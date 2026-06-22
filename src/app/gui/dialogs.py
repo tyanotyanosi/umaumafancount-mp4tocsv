@@ -14,23 +14,56 @@ class SettingsDialog:
     def __init__(self, parent, settings_service: SettingsService):
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("設定")
-        self.dialog.geometry("450x350")
-        self.dialog.resizable(False, False)
+        self.dialog.geometry("550x500")
+        self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
         self.settings_service = settings_service
         self.current_settings = settings_service.load()
 
-        main_frame = tk.Frame(self.dialog, padx=15, pady=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Scrollable content area with buttons fixed at bottom
+        content_frame = tk.Frame(self.dialog)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
 
-        self._create_roi_entry(main_frame, "Y 軸開始（上端比）", self.current_settings.roi_y_start)
-        self._create_roi_entry(main_frame, "Y 軸終了（下端比）", self.current_settings.roi_y_end)
-        self._create_roi_entry(main_frame, "X 軸開始（左端比）", self.current_settings.roi_x_start)
-        self._create_roi_entry(main_frame, "X 軸終了（右端比）", self.current_settings.roi_x_end)
+        # Horizontal scroll frame
+        h_scroll_frame = tk.Frame(content_frame)
+        h_scroll_frame.pack(fill=tk.BOTH, expand=True)
 
-        scale_frame = tk.LabelFrame(main_frame, text="画像スケーリング", font=("Meiryo UI", 9), padx=5, pady=5)
+        # Vertical scrollbar frame
+        v_scroll_frame = tk.Frame(content_frame)
+        v_scroll_frame.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(v_scroll_frame, highlightthickness=0)
+        v_scrollbar = ttk.Scrollbar(v_scroll_frame, orient="vertical", command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(h_scroll_frame, orient="horizontal", command=canvas.xview)
+        scrollable_area = tk.Frame(canvas)
+
+        scrollable_area.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scrollable_area, anchor="nw")
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+
+        h_scroll_frame.pack(fill=tk.BOTH, expand=True)
+        v_scroll_frame.pack(fill=tk.BOTH, expand=True)
+        canvas.pack(side="left", fill="both", expand=True)
+        v_scrollbar.pack(side="right", fill="y", in_=v_scroll_frame)
+        h_scrollbar.pack(side="bottom", fill="x", in_=h_scroll_frame)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        canvas.bind("<Button-4>", _on_mousewheel)
+        canvas.bind("<Button-5>", _on_mousewheel)
+
+        self.entry_y_start = self._create_roi_entry(scrollable_area, "Y 軸開始（上端比）", self.current_settings.roi_y_start)
+        self.entry_y_end = self._create_roi_entry(scrollable_area, "Y 軸終了（下端比）", self.current_settings.roi_y_end)
+        self.entry_x_start = self._create_roi_entry(scrollable_area, "X 軸開始（左端比）", self.current_settings.roi_x_start)
+        self.entry_x_end = self._create_roi_entry(scrollable_area, "X 軸終了（右端比）", self.current_settings.roi_x_end)
+
+        scale_frame = tk.LabelFrame(scrollable_area, text="画像スケーリング", font=("Meiryo UI", 9), padx=5, pady=5)
         scale_frame.pack(fill=tk.X, pady=(10, 5))
         self.var_img_scale = tk.StringVar(value=self.current_settings.img_scale or "")
         rb_none = tk.Radiobutton(scale_frame, text="なし", variable=self.var_img_scale, value="", font=("Meiryo UI", 9))
@@ -38,7 +71,33 @@ class SettingsDialog:
         rb_gray = tk.Radiobutton(scale_frame, text="グレースケール変換後にOCR実行", variable=self.var_img_scale, value="gray", font=("Meiryo UI", 9))
         rb_gray.pack(anchor=tk.W)
 
-        chk_frame = tk.Frame(main_frame)
+        mode_frame = tk.LabelFrame(scrollable_area, text="認識モード", font=("Meiryo UI", 9), padx=5, pady=5)
+        mode_frame.pack(fill=tk.X, pady=(5, 5))
+        self.var_mode = tk.StringVar(value=self.current_settings.mode or "ocr")
+        rb_ocr = tk.Radiobutton(mode_frame, text="WinRT OCR", variable=self.var_mode, value="ocr", font=("Meiryo UI", 9))
+        rb_ocr.pack(anchor=tk.W)
+        rb_vlm = tk.Radiobutton(mode_frame, text="VLM (Gemma-4)", variable=self.var_mode, value="vlm", font=("Meiryo UI", 9))
+        rb_vlm.pack(anchor=tk.W)
+        self.var_mode.trace_add("write", lambda *args: self._on_mode_change())
+
+        vlm_frame = tk.Frame(scrollable_area)
+        vlm_frame.pack(fill=tk.X, pady=(0, 5))
+        self.var_vlm_enabled = tk.BooleanVar(value=self.current_settings.use_vlm)
+        self.chk_vlm = tk.Checkbutton(vlm_frame, text="VLM 有効化（設定→VLMモード選択時に自動ON）", variable=self.var_vlm_enabled, font=("Meiryo UI", 9))
+        self.chk_vlm.pack(side=tk.LEFT)
+        self.entry_vlm_port = self._create_roi_entry(vlm_frame, "VLM ポート", self.current_settings.vlm_port)
+        self.entry_vlm_port.pack(fill=tk.X)
+
+        motion_frame = tk.LabelFrame(scrollable_area, text="モーション検知", font=("Meiryo UI", 9), padx=5, pady=5)
+        motion_frame.pack(fill=tk.X, pady=(5, 5))
+        self.var_motion_enabled = tk.BooleanVar(value=self.current_settings.motion_detection_enabled)
+        self.chk_motion = tk.Checkbutton(motion_frame, text="有効", variable=self.var_motion_enabled, font=("Meiryo UI", 9))
+        self.chk_motion.pack(side=tk.LEFT)
+
+        self.entry_motion_threshold = self._create_roi_entry(motion_frame, "閾値 (0.01=1%)", self.current_settings.motion_threshold)
+        self.entry_motion_threshold.configure(width=10) # Make it smaller
+
+        chk_frame = tk.Frame(scrollable_area)
         chk_frame.pack(fill=tk.X, pady=(5, 10))
         self.var_debug = tk.BooleanVar(value=self.current_settings.debug)
         self.chk_debug = tk.Checkbutton(chk_frame, text="デバッグモード", variable=self.var_debug, font=("Meiryo UI", 9))
@@ -52,6 +111,10 @@ class SettingsDialog:
         self.btn_cancel = tk.Button(btn_frame, text="キャンセル", font=("Meiryo UI", 10), command=self.dialog.destroy)
         self.btn_cancel.pack(side=tk.RIGHT)
 
+    def _on_mode_change(self, *args):
+        if self.var_mode.get() == "vlm":
+            self.var_vlm_enabled.set(True)
+
     def _create_roi_entry(self, parent, label_text, default_value):
         row = tk.Frame(parent)
         row.pack(fill=tk.X, pady=2)
@@ -62,35 +125,32 @@ class SettingsDialog:
         entry.pack(side=tk.LEFT)
         return entry
 
-    def _get_values(self):
-        entries = []
-        for widget in self.dialog.winfo_children():
-            if isinstance(widget, tk.Frame):
-                for child in widget.winfo_children():
-                    if isinstance(child, tk.LabelFrame): continue
-                    if isinstance(child, tk.Frame):
-                        for grandchild in child.winfo_children():
-                            if isinstance(grandchild, tk.Entry):
-                                entries.append(grandchild)
-
+    def _get_values(self) -> Optional[AppSettings]:
         try:
-            y_start = float(entries[0].get())
-            y_end = float(entries[1].get())
-            x_start = float(entries[2].get())
-            x_end = float(entries[3].get())
-        except (ValueError, IndexError):
+            y_start = float(self.entry_y_start.get())
+            y_end = float(self.entry_y_end.get())
+            x_start = float(self.entry_x_start.get())
+            x_end = float(self.entry_x_end.get())
+            motion_threshold = float(self.entry_motion_threshold.get())
+        except (ValueError, AttributeError):
             return None
-
+        
         errors = self.settings_service.validate_roi(y_start, y_end, x_start, x_end)
         if errors:
             mb.showerror("入力エラー", "\n".join(errors))
             return None
-
+        
+        use_vlm = self.var_vlm_enabled.get() or self.var_mode.get() == "vlm"
         return AppSettings(
             roi_y_start=y_start, roi_y_end=y_end,
             roi_x_start=x_start, roi_x_end=x_end,
             img_scale=self.var_img_scale.get() or None,
-            debug=self.var_debug.get()
+            debug=self.var_debug.get(),
+            use_vlm=use_vlm,
+            mode=self.var_mode.get(),
+            motion_detection_enabled=self.var_motion_enabled.get(),
+            motion_threshold=motion_threshold,
+            vlm_port=int(self.entry_vlm_port.get())
         )
 
     def _on_save(self):

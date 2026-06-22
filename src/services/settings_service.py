@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 from dataclasses import asdict
-from src.domain.models import AppSettings
+from src.domain.models import AppSettings, VLMConfig, PipelineConfig
 from src.utils.exceptions import AppError
 
 class SettingsService:
@@ -77,3 +77,11 @@ class SettingsService:
         config.roi_x_end = settings.roi_x_end
         config.img_scale = settings.img_scale
         config.debug = settings.debug
+        config.motion_detection_enabled = settings.motion_detection_enabled
+        config.motion_threshold = settings.motion_threshold
+        config.vlm_config = VLMConfig(
+            enabled=settings.use_vlm or settings.mode == "vlm",
+            model_path="models/gemma-4-e2b-it-edited-q4_0.gguf",
+            mmproj_path="models/mmproj-gemma-4-e2b-it-q4_0.gguf",
+            port=settings.vlm_port,
+        )

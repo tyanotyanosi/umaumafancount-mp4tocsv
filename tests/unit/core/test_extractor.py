@@ -110,3 +110,172 @@ class TestFanCountConsistency:
         extractor = FanCountExtractor(list_file, replace_file)
         fan_counts = extractor.extract(texts)
         assert fan_counts.get("万丈目準") == 3249444186
+
+
+class TestVLMJsonInput:
+    """VLM JSON形式の入力からのファン数抽出"""
+
+    def test_vlm_json_basic(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\nメンバーB\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": [1000000], "メンバーB": [2000000]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 1000000
+        assert fan_counts["メンバーB"] == 2000000
+
+    def test_vlm_json_integer_value(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": 500000}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 500000
+
+    def test_vlm_json_string_value(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": "1,500,000"}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 1500000
+
+    def test_vlm_json_multiple_frames_mode(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": [1000000]}',
+            '{"メンバーA": [1000000]}',
+            '{"メンバーA": [2000000]}',
+            '{"メンバーA": [1000000]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 1000000
+
+    def test_vlm_json_member_replacement(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("モルガン\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text('{"モルガン": ["モルン"]}', encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"モルン": [300000]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["モルガン"] == 300000
+
+    def test_vlm_json_partial_members(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\nメンバーB\nメンバーC\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": [1000000]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 1000000
+        assert fan_counts["メンバーB"] == 0
+        assert fan_counts["メンバーC"] == 0
+
+    def test_vlm_json_unknown_member_ignored(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": [1000000], "存在しない": [999999]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 1000000
+
+    def test_vlm_json_list_value(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": [500000]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 500000
+
+    def test_vlm_json_list_multiple_values(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": [100000, 200000]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 300000
+
+    def test_vlm_json_invalid_json_skipped(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            'not json at all',
+            '{"メンバーA": [1000000]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 1000000
+
+    def test_vlm_json_detection(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        assert extractor._is_vlm_json_input(['{"メンバーA": [1000]}']) is True
+        assert extractor._is_vlm_json_input(['メンバーA 1,000']) is False
+        assert extractor._is_vlm_json_input([]) is False
+        assert extractor._is_vlm_json_input(['', '  ', '{"メンバーA": [1000]}']) is True
+
+    def test_vlm_json_multiple_members_across_frames(self, tmp_path):
+        list_file = tmp_path / "memberList.txt"
+        list_file.write_text("メンバーA\nメンバーB\n", encoding="utf-8")
+        replace_file = tmp_path / "memberReplace.json"
+        replace_file.write_text("{}", encoding="utf-8")
+
+        extractor = FanCountExtractor(list_file, replace_file)
+        texts = [
+            '{"メンバーA": [1000000]}',
+            '{"メンバーB": [2000000]}',
+            '{"メンバーA": [1000000], "メンバーB": [2000000]}',
+        ]
+        fan_counts = extractor.extract(texts)
+        assert fan_counts["メンバーA"] == 1000000
+        assert fan_counts["メンバーB"] == 2000000

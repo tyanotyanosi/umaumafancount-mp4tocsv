@@ -7,16 +7,17 @@ import json
 from pathlib import Path
 import time
 
-from src.domain.models import PipelineConfig, OCRResult
+from src.domain.models import PipelineConfig, OCRResult, VLMConfig
 from src.core.pipeline import PipelineRunner, PipelineWorker
 from src.services.settings_service import SettingsService
 from src.services.member_service import MemberService
 from src.app.gui.dialogs import SettingsDialog, MemberEditorDialog
 
 class AppWindow:
-    def __init__(self, debug: bool = False, img_scale: str = None):
+    def __init__(self, debug: bool = False, img_scale: str = None, mode: str = "ocr"):
         self.debug = debug
         self.img_scale = img_scale
+        self.mode = mode
         self.is_processing = False
 
         self.settings_service = SettingsService()
@@ -82,8 +83,32 @@ class AppWindow:
         if not file_path: return
         
         self.lbl_path.config(text=Path(file_path).name)
-        config = PipelineConfig(video_path=Path(file_path), debug=self.debug, img_scale=self.img_scale)
-        self.settings_service.apply_to_config(config)
+        
+        # 先に設定を読み込む
+        settings = self.settings_service.load()
+        
+        config = PipelineConfig(
+            video_path=Path(file_path),
+            debug=self.debug,
+            img_scale=self.img_scale,
+            mode=self.mode,
+            motion_detection_enabled=settings.motion_detection_enabled,
+            motion_threshold=settings.motion_threshold
+        )
+        
+        config.vlm_config = VLMConfig(
+            enabled=settings.use_vlm or settings.mode == "vlm",
+            model_path="models/gemma-4-e2b-it-edited-q4_0.gguf",
+            mmproj_path="models/mmproj-gemma-4-e2b-it-q4_0.gguf",
+            port=settings.vlm_port,
+            debug=config.debug,
+        )
+        config.roi_y_start = settings.roi_y_start
+        config.roi_y_end = settings.roi_y_end
+        config.roi_x_start = settings.roi_x_start
+        config.roi_x_end = settings.roi_x_end
+        config.img_scale = settings.img_scale
+        config.debug = self.debug or settings.debug
         
         worker = PipelineWorker(config, self.result_queue)
         self.is_processing = True

@@ -3,8 +3,21 @@ from pathlib import Path
 from typing import Optional, List, Dict
 
 @dataclass
+class VLMConfig:
+    """VLM (Vision-Language Model) 推論の設定"""
+    enabled: bool = False
+    model_path: str = "models/gemma-4-e2b-it-edited-q4_0.gguf"
+    mmproj_path: str = "models/mmproj-gemma-4-e2b-it-q4_0.gguf"
+    temperature: float = 0.0
+    max_tokens: int = 8192
+    prompt_template: Optional[str] = None
+    port: int = 8080
+    ngl: int = 99
+    debug: bool = False
+
+@dataclass
 class PipelineConfig:
-    """OCR パイプライン実行の設定"""
+    """OCR/VLM パイプライン実行の設定"""
     video_path: Path
     debug: bool = False
     img_scale: Optional[str] = None  # "gray" or None
@@ -12,6 +25,10 @@ class PipelineConfig:
     roi_y_end: float = 0.88         # ROI Y軸終了（画面高さの割合）
     roi_x_start: float = 0.15       # ROI X軸開始（画面幅の割合）
     roi_x_end: float = 0.45         # ROI X軸終了（画面幅の割合）
+    vlm_config: Optional[VLMConfig] = None
+    mode: str = "ocr"  # "ocr" or "vlm"
+    motion_detection_enabled: bool = False
+    motion_threshold: float = 0.01
 
 @dataclass
 class ProgressUpdate:
@@ -23,7 +40,7 @@ class ProgressUpdate:
 
 @dataclass
 class OCRResult:
-    """OCR パイプラインの完了結果"""
+    """OCR/VLM パイプラインの完了結果"""
     fan_counts: Dict[str, int]
     texts: List[str]
     error: Optional[str] = None
@@ -37,6 +54,11 @@ class AppSettings:
     roi_x_end: float = 0.45
     img_scale: Optional[str] = None
     debug: bool = False
+    use_vlm: bool = False
+    mode: str = "ocr"  # "ocr" or "vlm"
+    motion_detection_enabled: bool = False
+    motion_threshold: float = 0.01
+    vlm_port: int = 8080
 
 @dataclass
 class MemberEntry:

@@ -3,6 +3,7 @@ __pycache__/
 *.py[oc]
 build/
 dist/
+tmp/
 wheels/
 *.egg-info
 output/**
@@ -21,3 +22,8 @@ opencode.json
 AGENTS.md
 docs/
 config/
+llama/
+models/
+run_*.ps1
+Bug-Dashboard.md
+.obsidian/

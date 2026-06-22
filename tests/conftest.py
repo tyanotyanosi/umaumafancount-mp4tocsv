@@ -27,6 +27,8 @@ for _mod_name in [
     "winrt.windows.storage",
     "winrt.runtime",
     "tqdm",
+    "llama_cpp",
+    "llama_cpp.llama_chat_format",
 ]:
     _m = MagicMock()
     _MOCKS[_mod_name] = _m
