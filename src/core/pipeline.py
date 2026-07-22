@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import threading
 import queue
 import time
@@ -51,15 +52,19 @@ class PipelineRunner:
                 texts = []
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
+                executor = None
                 try:
                     def wrapped_on_progress(msg: str, pct: float = 0.0):
                         on_progress(msg, pct)
 
-                    processor = VLMFrameProcessor(config)
+                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                    processor = VLMFrameProcessor(config, executor=executor)
                     texts = loop.run_until_complete(
                         processor.process_video_vlm(on_progress=wrapped_on_progress)
                     )
                 finally:
+                    if executor:
+                        executor.shutdown(wait=True)
                     loop.close()
             else:
                 ocr_service = OCRService()
@@ -112,10 +117,11 @@ from src.utils.image import crop_roi, check_motion
 class VLMFrameProcessor:
     """VLM 用のフレーム処理クラス - フルフレームを対象に画像を抽出"""
 
-    def __init__(self, config: PipelineConfig):
+    def __init__(self, config: PipelineConfig, executor=None):
         self.config = config
         self.vlm_config = config.vlm_config
         self._last_frame_gray: Optional[np.ndarray] = None
+        self._executor = executor
 
     async def process_video_vlm(
         self,
@@ -132,7 +138,7 @@ class VLMFrameProcessor:
         results: List[str] = []
         debug_path = Path("output/debug")
 
-        vlm_service = VLMService(self.vlm_config)
+        vlm_service = VLMService(self.vlm_config, executor=self._executor)
         try:
             # VLM 用の ROI 設定（OCR と同じ領域）
             y_start, y_end = 0.45, 0.88

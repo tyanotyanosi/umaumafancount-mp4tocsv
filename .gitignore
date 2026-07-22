@@ -27,3 +27,8 @@ models/
 run_*.ps1
 Bug-Dashboard.md
 .obsidian/
+opencode_output.txt
+auto_loop.py
+pytest_output.txt
+
+node_modules/

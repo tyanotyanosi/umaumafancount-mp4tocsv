@@ -63,14 +63,6 @@ class SettingsDialog:
         self.entry_x_start = self._create_roi_entry(scrollable_area, "X 軸開始（左端比）", self.current_settings.roi_x_start)
         self.entry_x_end = self._create_roi_entry(scrollable_area, "X 軸終了（右端比）", self.current_settings.roi_x_end)
 
-        scale_frame = tk.LabelFrame(scrollable_area, text="画像スケーリング", font=("Meiryo UI", 9), padx=5, pady=5)
-        scale_frame.pack(fill=tk.X, pady=(10, 5))
-        self.var_img_scale = tk.StringVar(value=self.current_settings.img_scale or "")
-        rb_none = tk.Radiobutton(scale_frame, text="なし", variable=self.var_img_scale, value="", font=("Meiryo UI", 9))
-        rb_none.pack(anchor=tk.W)
-        rb_gray = tk.Radiobutton(scale_frame, text="グレースケール変換後にOCR実行", variable=self.var_img_scale, value="gray", font=("Meiryo UI", 9))
-        rb_gray.pack(anchor=tk.W)
-
         mode_frame = tk.LabelFrame(scrollable_area, text="認識モード", font=("Meiryo UI", 9), padx=5, pady=5)
         mode_frame.pack(fill=tk.X, pady=(5, 5))
         self.var_mode = tk.StringVar(value=self.current_settings.mode or "ocr")
@@ -80,13 +72,14 @@ class SettingsDialog:
         rb_vlm.pack(anchor=tk.W)
         self.var_mode.trace_add("write", lambda *args: self._on_mode_change())
 
-        vlm_frame = tk.Frame(scrollable_area)
-        vlm_frame.pack(fill=tk.X, pady=(0, 5))
-        self.var_vlm_enabled = tk.BooleanVar(value=self.current_settings.use_vlm)
-        self.chk_vlm = tk.Checkbutton(vlm_frame, text="VLM 有効化（設定→VLMモード選択時に自動ON）", variable=self.var_vlm_enabled, font=("Meiryo UI", 9))
-        self.chk_vlm.pack(side=tk.LEFT)
-        self.entry_vlm_port = self._create_roi_entry(vlm_frame, "VLM ポート", self.current_settings.vlm_port)
-        self.entry_vlm_port.pack(fill=tk.X)
+        self.scale_frame = tk.LabelFrame(scrollable_area, text="画像スケーリング", font=("Meiryo UI", 9), padx=5, pady=5)
+        self.scale_frame.pack(fill=tk.X, pady=(5, 5))
+        self.var_img_scale = tk.StringVar(value=self.current_settings.img_scale or "")
+        rb_none = tk.Radiobutton(self.scale_frame, text="なし", variable=self.var_img_scale, value="", font=("Meiryo UI", 9))
+        rb_none.pack(anchor=tk.W)
+        rb_gray = tk.Radiobutton(self.scale_frame, text="グレースケール変換後にOCR実行", variable=self.var_img_scale, value="gray", font=("Meiryo UI", 9))
+        rb_gray.pack(anchor=tk.W)
+        self._toggle_grayscale_visibility()
 
         motion_frame = tk.LabelFrame(scrollable_area, text="モーション検知", font=("Meiryo UI", 9), padx=5, pady=5)
         motion_frame.pack(fill=tk.X, pady=(5, 5))
@@ -96,6 +89,14 @@ class SettingsDialog:
 
         self.entry_motion_threshold = self._create_roi_entry(motion_frame, "閾値 (0.01=1%)", self.current_settings.motion_threshold)
         self.entry_motion_threshold.configure(width=10) # Make it smaller
+
+        self.vlm_frame = tk.LabelFrame(scrollable_area, text="VLM 並列処理", font=("Meiryo UI", 9), padx=5, pady=5)
+        self.vlm_frame.pack(fill=tk.X, pady=(5, 5))
+        self.lbl_vlm_workers = tk.Label(self.vlm_frame, text="並列数:", font=("Meiryo UI", 9), width=18, anchor=tk.W)
+        self.lbl_vlm_workers.pack(side=tk.LEFT)
+        self.entry_vlm_workers = tk.Entry(self.vlm_frame, width=10, font=("Meiryo UI", 9))
+        self.entry_vlm_workers.insert(0, str(self.current_settings.vlm_max_workers))
+        self.entry_vlm_workers.pack(side=tk.LEFT)
 
         chk_frame = tk.Frame(scrollable_area)
         chk_frame.pack(fill=tk.X, pady=(5, 10))
@@ -112,8 +113,20 @@ class SettingsDialog:
         self.btn_cancel.pack(side=tk.RIGHT)
 
     def _on_mode_change(self, *args):
+        self._toggle_grayscale_visibility()
+        self._toggle_vlm_visibility()
+
+    def _toggle_grayscale_visibility(self):
         if self.var_mode.get() == "vlm":
-            self.var_vlm_enabled.set(True)
+            self.scale_frame.pack_forget()
+        else:
+            self.scale_frame.pack(fill=tk.X, pady=(5, 5))
+
+    def _toggle_vlm_visibility(self):
+        if self.var_mode.get() == "vlm":
+            self.vlm_frame.pack(fill=tk.X, pady=(5, 5))
+        else:
+            self.vlm_frame.pack_forget()
 
     def _create_roi_entry(self, parent, label_text, default_value):
         row = tk.Frame(parent)
@@ -132,6 +145,7 @@ class SettingsDialog:
             x_start = float(self.entry_x_start.get())
             x_end = float(self.entry_x_end.get())
             motion_threshold = float(self.entry_motion_threshold.get())
+            vlm_workers = int(self.entry_vlm_workers.get())
         except (ValueError, AttributeError):
             return None
         
@@ -140,7 +154,7 @@ class SettingsDialog:
             mb.showerror("入力エラー", "\n".join(errors))
             return None
         
-        use_vlm = self.var_vlm_enabled.get() or self.var_mode.get() == "vlm"
+        use_vlm = self.var_mode.get() == "vlm"
         return AppSettings(
             roi_y_start=y_start, roi_y_end=y_end,
             roi_x_start=x_start, roi_x_end=x_end,
@@ -150,7 +164,7 @@ class SettingsDialog:
             mode=self.var_mode.get(),
             motion_detection_enabled=self.var_motion_enabled.get(),
             motion_threshold=motion_threshold,
-            vlm_port=int(self.entry_vlm_port.get())
+            vlm_max_workers=vlm_workers
         )
 
     def _on_save(self):

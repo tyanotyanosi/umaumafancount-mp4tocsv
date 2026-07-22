@@ -87,6 +87,9 @@ uv run main.py <動画ファイル名.mp4> --debug
 
 # グレースケール変換を利用 (精度向上用)
 uv run main.py <動画ファイル名.mp4> --img-scale gray
+
+# VLMモードで解析 (LLM使用)
+uv run main.py <動画ファイル名.mp4> --mode vlm
 ```
 
 ---

@@ -49,7 +49,8 @@ class VLMService:
     画像 + プロンプトからファン数を抽出する。
     """
 
-    def __init__(self, config: VLMConfig):
+    def __init__(self, config: VLMConfig, executor=None):
+        self._executor = executor
         self.config = config
         if config.prompt_template:
             self._prompt_template = config.prompt_template
@@ -220,8 +221,9 @@ class VLMService:
             print(f"[VLM] Prompt length: {len(prompt)} chars")
 
             # llama-cli で推論実行（同期処理を別スレッドで実行）
-            raw_text = await asyncio.get_event_loop().run_in_executor(
-                None,
+            loop = asyncio.get_running_loop()
+            raw_text = await loop.run_in_executor(
+                self._executor,
                 lambda: self._run_llama_cli(Path(temp_image_path), prompt, frame_index)
             )
 
@@ -270,7 +272,10 @@ class VLMService:
             if start != -1 and end != -1 and end > start:
                 json_str = text[start:end + 1]
             else:
-                json_str = '{}'
+                raise AppError(
+                    message=f"VLM の応答から JSON を抽出できませんでした。応答内容: {repr(text[:500])}",
+                    hint="モデルの出力形式が期待と異なります。WinRT OCR モードをお試しください。"
+                )
 
         safe = json_str[:300].encode('cp932', errors='replace').decode('cp932')
         print(f"[VLM] Extracted JSON: {safe}")
@@ -375,12 +380,12 @@ class VLMService:
                 continue
 
         print(f"[VLM] Parsed result: {result}")
+        return result
 
     def _safe_print(self, msg: str) -> None:
         """Unicode safe print (cp932 fallback)"""
         safe = msg.encode('cp932', errors='replace').decode('cp932')
         print(f"[VLM] {safe}")
-        return result
 
     async def stop(self):
         """VLM リソースを解放する"""

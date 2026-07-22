@@ -14,6 +14,7 @@ class VLMConfig:
     port: int = 8080
     ngl: int = 99
     debug: bool = False
+    max_workers: int = 1
 
 @dataclass
 class PipelineConfig:
@@ -58,7 +59,7 @@ class AppSettings:
     mode: str = "ocr"  # "ocr" or "vlm"
     motion_detection_enabled: bool = False
     motion_threshold: float = 0.01
-    vlm_port: int = 8080
+    vlm_max_workers: int = 1
 
 @dataclass
 class MemberEntry:

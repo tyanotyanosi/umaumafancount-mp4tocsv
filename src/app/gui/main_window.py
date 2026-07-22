@@ -100,8 +100,8 @@ class AppWindow:
             enabled=settings.use_vlm or settings.mode == "vlm",
             model_path="models/gemma-4-e2b-it-edited-q4_0.gguf",
             mmproj_path="models/mmproj-gemma-4-e2b-it-q4_0.gguf",
-            port=settings.vlm_port,
             debug=config.debug,
+            max_workers=settings.vlm_max_workers,
         )
         config.roi_y_start = settings.roi_y_start
         config.roi_y_end = settings.roi_y_end

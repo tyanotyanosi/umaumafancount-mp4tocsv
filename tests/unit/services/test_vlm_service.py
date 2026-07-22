@@ -60,7 +60,7 @@ class TestVLMServiceParseJsonResponse:
         text = 'これは JSON ではありません'
         with pytest.raises(AppError) as exc_info:
             vlm_service._parse_json_response(text)
-        assert "VLM の応答を JSON としてパースできませんでした" in str(exc_info.value)
+        assert "VLM の応答から JSON を抽出できませんでした" in str(exc_info.value)
 
     def test_parse_json_with_float_values(self, vlm_service):
         text = '{"メンバー A": 12345.0, "メンバー B": 67890.5}'
@@ -159,7 +159,7 @@ class TestVLMServiceAnalyzeImage:
             
             with pytest.raises(AppError) as exc_info:
                 await vlm_service.analyze_image(mock_image)
-            assert "VLM の応答を JSON としてパースできませんでした" in str(exc_info.value)
+        assert "VLM の応答から JSON を抽出できませんでした" in str(exc_info.value)
 
 
 class TestVLMServicePromptTemplate:
