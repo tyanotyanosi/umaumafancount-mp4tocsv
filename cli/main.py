@@ -1,0 +1,273 @@
+import argparse
+from pathlib import Path
+import cv2
+import yaml
+
+from src.video.reader import VideoReader
+from src.video.extractor import FrameExtractor
+from src.video.diff_checker import DiffChecker
+from src.video.card_detector import CardDetector
+from src.ocr.meiki_ocr import MeikiOCRWrapper
+from src.ocr.gemma4 import Gemma4Wrapper
+from src.parser.result_parser import ResultParser
+from src.parser.name_mapper import NameMapper, NameMapperLoader
+from src.output.json_writer import JSONWriter
+from src.output.csv_writer import CSVWriter
+from src.utils.error_handler import ErrorHandler, ErrorLevel
+
+
+def load_settings(settings_path: str = "config/settings.yaml") -> dict:
+    """設定ファイルを読み込み"""
+    with open(settings_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def build_detector(settings: dict) -> CardDetector:
+    """settings から CardDetector を生成"""
+    cd = settings.get("card_detection", {}) if settings else {}
+    template_dir = cd.get("template_dir", "template")
+    return CardDetector(template_dir=template_dir, settings=settings)
+
+
+def build_name_mapper(settings: dict, name_mapping_file: str = None,
+                      no_name_mapping: bool = False):
+    """settings の ``name_mapping`` セクションから NameMapper を構築。
+
+    - ``no_name_mapping=True`` または ``enable`` が false の場合は ``None``
+      を返し、現状維持（検知のまま集計）となる。
+    - ``name_mapping_file`` が指定された場合は設定の ``file`` を上書きする。
+    """
+    nm = (settings or {}).get("name_mapping", {})
+    if no_name_mapping or not nm.get("enable", False):
+        return None
+    path = name_mapping_file or nm.get("file", "config/name_mapping.json")
+    mapping = NameMapperLoader.load_mapping(path)
+    return NameMapper(
+        mapping=mapping,
+        edit_distance_threshold=int(nm.get("edit_distance_threshold", 2)),
+        unmapped_action=nm.get("unmapped_action", "suggest"),
+        warn_on_approx=bool(nm.get("warn_on_approx", True)),
+    )
+
+
+def _extract_crop(frame, box, min_height: int = 60):
+    """box の crop を抽出。高さが min_height 未満の場合は 2x アップスケールして返す。"""
+    x, y, w, h = box
+    crop = frame[y:y + h, x:x + w]
+    if crop.size == 0:
+        return crop
+    if h < min_height:
+        crop = cv2.resize(crop, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+    return crop
+
+
+def _build_ocr_engines(ocr_engine: str, settings: dict):
+    """OCRエンジンを構築し、(name_ocr, name_ocr_low, fan_ocr) を返す。"""
+    if ocr_engine == "meiki":
+        print("meikiOCR初期化中...")
+        meiki_config = settings.get("ocr", {}).get("meiki", {})
+        name_det_threshold = meiki_config.get("name_det_threshold", 0.3)
+        name_rec_threshold = meiki_config.get("name_rec_threshold", 0.2)
+        fan_det_threshold = meiki_config.get("fan_det_threshold", 0.3)
+        fan_rec_threshold = meiki_config.get("fan_rec_threshold", 0.05)
+        print(f"  meikiOCR name_det_threshold={name_det_threshold}, name_rec_threshold={name_rec_threshold}")
+        print(f"  meikiOCR fan_det_threshold={fan_det_threshold}, fan_rec_threshold={fan_rec_threshold}")
+        name_det_low = meiki_config.get("name_det_threshold_low", 0.2)
+        name_rec_low = meiki_config.get("name_rec_threshold_low", 0.1)
+        name_ocr = MeikiOCRWrapper(det_threshold=name_det_threshold, rec_threshold=name_rec_threshold)
+        name_ocr_low = MeikiOCRWrapper(det_threshold=name_det_low, rec_threshold=name_rec_low)
+        fan_ocr = MeikiOCRWrapper(det_threshold=fan_det_threshold, rec_threshold=fan_rec_threshold)
+        return name_ocr, name_ocr_low, fan_ocr
+
+    print("Gemma4初期化中...")
+    ocr = Gemma4Wrapper()
+    return ocr, None, ocr
+
+
+def _process_frames(frames, detector: CardDetector, name_ocr, name_ocr_low, fan_ocr,
+                    output_dir: str, debug: bool = False) -> list:
+    """フレームを順に処理（カード検出 + OCR）。フレームごとの結果リストを返す。"""
+    all_results = []
+    debug_dir = Path(output_dir) / "debug"
+    if debug:
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        print(f"デバッグモード: {debug_dir} に画像を保存")
+
+    for i, frame in enumerate(frames):
+        print(f"フレーム {i+1}/{len(frames)} 処理中...")
+
+        if debug:
+            cv2.imwrite(str(debug_dir / f"frame_{i:04d}.png"), frame)
+
+        cards = detector.detect(frame)
+        frame_result = {"cards": []}
+
+        for c, card in enumerate(cards):
+            name_raw = None
+            if card.name_box:
+                crop = _extract_crop(frame, card.name_box)
+                if debug:
+                    cv2.imwrite(str(debug_dir / f"frame_{i:04d}_card{c}_name.png"), crop)
+                name_raw = name_ocr.recognize(crop)
+                if not name_raw and name_ocr_low is not None:
+                    name_raw = name_ocr_low.recognize(crop)
+                if debug:
+                    with open(debug_dir / f"frame_{i:04d}_card{c}_name_ocr.txt", "w", encoding="utf-8") as f:
+                        f.write(name_raw if name_raw else "")
+            if card.fan_box:
+                crop = _extract_crop(frame, card.fan_box)
+                fans_raw = None
+                if debug:
+                    cv2.imwrite(str(debug_dir / f"frame_{i:04d}_card{c}_fan.png"), crop)
+                fans_raw = fan_ocr.recognize(crop)
+                if debug:
+                    with open(debug_dir / f"frame_{i:04d}_card{c}_fan_ocr.txt", "w", encoding="utf-8") as f:
+                        f.write(fans_raw if fans_raw else "")
+            else:
+                fans_raw = None
+            frame_result["cards"].append({
+                "role": card.role,
+                "name_raw": name_raw,
+                "fans_raw": fans_raw,
+                "name_box": card.name_box,
+                "fan_box": card.fan_box,
+            })
+            if i < 5:
+                print(f"  カード{c} ({card.role}): name={repr(name_raw)}, fans={repr(fans_raw)}")
+
+        all_results.append(frame_result)
+
+    return all_results
+
+
+def _write_outputs(merged: dict, output_dir: str) -> tuple:
+    """JSON/CSV を書き出し、パスを返す。"""
+    json_writer = JSONWriter(Path(output_dir) / "json")
+    csv_writer = CSVWriter(Path(output_dir) / "csv")
+    json_path = json_writer.write(merged)
+    csv_path = csv_writer.write(merged)
+    print(f"JSON出力: {json_path}")
+    print(f"CSV出力: {csv_path}")
+    return json_path, csv_path
+
+
+def process_video(video_path: str, ocr_engine: str = "meiki",
+                  interval: float = 1.0, use_diff: bool = True,
+                  output_dir: str = "output", debug: bool = False,
+                  detector: CardDetector = None,
+                  settings: dict = None,
+                  name_mapping_file: str = None,
+                  no_name_mapping: bool = False):
+    """動画処理のメインロジック"""
+    error_handler = ErrorHandler()
+
+    try:
+        print(f"動画読み込み中: {video_path}")
+        with VideoReader(video_path) as reader:
+            fps = reader.get_fps()
+            frames_count = reader.get_frame_count()
+            print(f"  FPS: {fps}, フレーム数: {frames_count}")
+
+            extractor = FrameExtractor(reader, interval_sec=interval)
+
+            if use_diff:
+                if settings is None:
+                    settings = load_settings()
+                diff_threshold = float(settings.get("video", {}).get("diff_threshold", 0.03))
+                diff_checker = DiffChecker(threshold=diff_threshold)
+                print(f"フレームをストリーミングし差分判定中（間隔: {interval}秒、閾値: {diff_threshold}）...")
+            else:
+                diff_checker = None
+                print(f"フレーム抽出中（間隔: {interval}秒、差分判定なし）...")
+
+            frames = []
+            total = 0
+            for frame in extractor.iter_frames():
+                total += 1
+                if diff_checker is not None:
+                    if diff_checker.is_different(frame):
+                        frames.append(frame)
+                        diff_checker.update(frame)
+                else:
+                    frames.append(frame)
+            print(f"  計 {total} フレームを処理し、{len(frames)} フレームを採用")
+
+            if ocr_engine not in ("meiki", "gemma4"):
+                error_handler.handle(ErrorLevel.USER_ERROR, f"不明なOCRエンジン: {ocr_engine}")
+                return {}
+            if settings is None:
+                settings = load_settings()
+            name_ocr, name_ocr_low, fan_ocr = _build_ocr_engines(ocr_engine, settings)
+
+            if detector is None:
+                print("カード検出器初期化中...")
+                detector = build_detector(settings)
+
+            all_results = _process_frames(frames, detector, name_ocr, name_ocr_low,
+                                           fan_ocr, output_dir, debug)
+
+            print(f"\n処理完了: 計 {sum(len(r['cards']) for r in all_results)} 件のカード")
+
+            mapper = build_name_mapper(settings, name_mapping_file, no_name_mapping)
+            if mapper is not None:
+                file_path = name_mapping_file or settings.get("name_mapping", {}).get("file", "config/name_mapping.json")
+                print(f"名前マッピングを適用中（定義ファイル: {file_path}）")
+            merged = ResultParser().parse_batch(all_results, mapper=mapper)
+            print(f"ユーザ情報を抽出: {len(merged)} 件")
+
+            if mapper is not None:
+                for warning in mapper.warnings:
+                    print(f"  警告（近似一致）: {warning}")
+                if mapper.unmapped_names:
+                    unmapped = sorted(set(mapper.unmapped_names))
+                    print(f"未マッピングの検知: {len(unmapped)} 件（unmapped_action='{mapper.unmapped_action}'、集計には含めず）")
+                    for name in unmapped:
+                        print(f"  - {name}")
+
+            _write_outputs(merged, output_dir)
+
+            return merged
+
+    except Exception as e:
+        error_handler.handle(ErrorLevel.SYSTEM_ERROR, f"動画処理中にエラーが発生: {e}", e)
+        raise
+
+
+def main():
+    settings = load_settings()
+    default_interval = float(settings.get("video", {}).get("frame_interval", 1.0))
+
+    parser = argparse.ArgumentParser(description="ウマ娘の動画からファン人数を抽出")
+    parser.add_argument("--video", "-v", required=True, help="入力動画パス")
+    parser.add_argument("--output", "-o", default="output", help="出力ディレクトリ")
+    parser.add_argument("--format", "-f", choices=["json", "csv", "all"], default="all")
+    parser.add_argument("--ocr", "-O", choices=["meiki", "gemma4"], default="meiki")
+    parser.add_argument("--interval", "-i", type=float, default=default_interval, help="抽出間隔（秒）")
+    parser.add_argument("--diff", "-d", action="store_true", default=True, help="差分判定有効")
+    parser.add_argument("--no-diff", action="store_true", help="差分判定無効")
+    parser.add_argument("--debug", "-D", action="store_true", default=False, help="デバッグモード（フレームとcrop画像を保存）")
+    parser.add_argument("--name-mapping-file", default=None,
+                        help="名前マッピング定義ファイルのパス（設定の name_mapping.file を上書き）")
+    parser.add_argument("--no-name-mapping", action="store_true",
+                        help="名前マッピングを無効化（設定の name_mapping.enable を無視）")
+
+    args = parser.parse_args()
+
+    if args.no_diff:
+        args.diff = False
+
+    process_video(
+        video_path=args.video,
+        ocr_engine=args.ocr,
+        interval=args.interval,
+        use_diff=args.diff,
+        output_dir=args.output,
+        debug=args.debug,
+        settings=settings,
+        name_mapping_file=args.name_mapping_file,
+        no_name_mapping=args.no_name_mapping
+    )
+
+
+if __name__ == "__main__":
+    main()

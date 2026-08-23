@@ -32,3 +32,11 @@ auto_loop.py
 pytest_output.txt
 
 node_modules/
+old
+.obsidian
+.pytest*
+inputans
+inputmov
+tests
+output/*
+!output/.gitkeep
