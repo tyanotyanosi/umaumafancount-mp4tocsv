@@ -37,6 +37,5 @@ old
 .pytest*
 inputans
 inputmov
-tests
 output/*
 !output/.gitkeep

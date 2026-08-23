@@ -28,6 +28,9 @@ mov-to-fan-count-gui = "gui.__main__:main"
 [tool.pytest.ini_options]
 # old/ は旧アーキテクチャのバックアップであり、tests/ とパッケージ名が衝突するため収集対象外とする
 testpaths = ["tests"]
+markers = [
+    "slow: フル動画 E2E テスト（長時間実行。デフォルトでは MOV_E2E=1 でオプトインして実行）",
+]
 
 [tool.setuptools.packages.find]
 include = ["src*", "cli*", "gui*"]
