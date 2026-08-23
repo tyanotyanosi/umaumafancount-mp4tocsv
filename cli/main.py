@@ -4,11 +4,12 @@ import cv2
 import yaml
 
 from src.video.reader import VideoReader
-from src.video.extractor import FrameExtractor
+from src.video.extractor import FrameExtractor, compute_frame_range
 from src.video.diff_checker import DiffChecker
 from src.video.card_detector import CardDetector
 from src.ocr.meiki_ocr import MeikiOCRWrapper
 from src.ocr.gemma4 import Gemma4Wrapper
+from src.ocr.cache import CachingOCR
 from src.parser.result_parser import ResultParser
 from src.parser.name_mapper import NameMapper, NameMapperLoader
 from src.output.json_writer import JSONWriter
@@ -61,32 +62,49 @@ def _extract_crop(frame, box, min_height: int = 60):
     return crop
 
 
-def _build_ocr_engines(ocr_engine: str, settings: dict):
-    """OCRエンジンを構築し、(name_ocr, name_ocr_low, fan_ocr) を返す。"""
+def _build_ocr_engines(ocr_engine: str, settings: dict, quiet: bool = False):
+    """OCRエンジンを構築し、(name_ocr, name_ocr_low, fan_ocr) を返す。
+
+    ``ocr.cache``（デフォルト true）が有効な場合、各エンジンは ``CachingOCR``
+    でラップされ、crop ハッシュをキーに結果がキャッシュされる。
+    ``quiet=True`` の場合は初期化の進行表示を抑制する。
+    """
+    cache_enabled = bool((settings or {}).get("ocr", {}).get("cache", True))
+
+    def _wrap(eng, name):
+        return CachingOCR(eng, name=name) if cache_enabled else eng
+
     if ocr_engine == "meiki":
-        print("meikiOCR初期化中...")
+        if not quiet:
+            print("meikiOCR初期化中...")
         meiki_config = settings.get("ocr", {}).get("meiki", {})
         name_det_threshold = meiki_config.get("name_det_threshold", 0.3)
         name_rec_threshold = meiki_config.get("name_rec_threshold", 0.2)
         fan_det_threshold = meiki_config.get("fan_det_threshold", 0.3)
         fan_rec_threshold = meiki_config.get("fan_rec_threshold", 0.05)
-        print(f"  meikiOCR name_det_threshold={name_det_threshold}, name_rec_threshold={name_rec_threshold}")
-        print(f"  meikiOCR fan_det_threshold={fan_det_threshold}, fan_rec_threshold={fan_rec_threshold}")
+        if not quiet:
+            print(f"  meikiOCR name_det_threshold={name_det_threshold}, name_rec_threshold={name_rec_threshold}")
+            print(f"  meikiOCR fan_det_threshold={fan_det_threshold}, fan_rec_threshold={fan_rec_threshold}")
         name_det_low = meiki_config.get("name_det_threshold_low", 0.2)
         name_rec_low = meiki_config.get("name_rec_threshold_low", 0.1)
         name_ocr = MeikiOCRWrapper(det_threshold=name_det_threshold, rec_threshold=name_rec_threshold)
         name_ocr_low = MeikiOCRWrapper(det_threshold=name_det_low, rec_threshold=name_rec_low)
         fan_ocr = MeikiOCRWrapper(det_threshold=fan_det_threshold, rec_threshold=fan_rec_threshold)
-        return name_ocr, name_ocr_low, fan_ocr
+        return _wrap(name_ocr, "name"), _wrap(name_ocr_low, "name_low"), _wrap(fan_ocr, "fan")
 
-    print("Gemma4初期化中...")
+    if not quiet:
+        print("Gemma4初期化中...")
     ocr = Gemma4Wrapper()
-    return ocr, None, ocr
+    return _wrap(ocr, "name"), None, _wrap(ocr, "fan")
 
 
 def _process_frames(frames, detector: CardDetector, name_ocr, name_ocr_low, fan_ocr,
-                    output_dir: str, debug: bool = False) -> list:
-    """フレームを順に処理（カード検出 + OCR）。フレームごとの結果リストを返す。"""
+                    output_dir: str, debug: bool = False, quiet: bool = False) -> list:
+    """フレームを順に処理（カード検出 + OCR）。フレームごとの結果リストを返す。
+
+    ``quiet=True`` の場合はフレーム毎・カード毎の進行表示を抑制する
+    （エラーとサマリーは残す）。
+    """
     all_results = []
     debug_dir = Path(output_dir) / "debug"
     if debug:
@@ -94,7 +112,8 @@ def _process_frames(frames, detector: CardDetector, name_ocr, name_ocr_low, fan_
         print(f"デバッグモード: {debug_dir} に画像を保存")
 
     for i, frame in enumerate(frames):
-        print(f"フレーム {i+1}/{len(frames)} 処理中...")
+        if not quiet:
+            print(f"フレーム {i+1}/{len(frames)} 処理中...")
 
         if debug:
             cv2.imwrite(str(debug_dir / f"frame_{i:04d}.png"), frame)
@@ -132,7 +151,7 @@ def _process_frames(frames, detector: CardDetector, name_ocr, name_ocr_low, fan_
                 "name_box": card.name_box,
                 "fan_box": card.fan_box,
             })
-            if i < 5:
+            if not quiet and i < 5:
                 print(f"  カード{c} ({card.role}): name={repr(name_raw)}, fans={repr(fans_raw)}")
 
         all_results.append(frame_result)
@@ -157,16 +176,38 @@ def process_video(video_path: str, ocr_engine: str = "meiki",
                   detector: CardDetector = None,
                   settings: dict = None,
                   name_mapping_file: str = None,
-                  no_name_mapping: bool = False):
-    """動画処理のメインロジック"""
+                  no_name_mapping: bool = False,
+                  start_sec: float = 0.0, end_sec: float = 0.0, limit_sec: float = 0.0,
+                  quiet: bool = False):
+    """動画処理のメインロジック
+
+    - ``start_sec`` / ``end_sec`` / ``limit_sec``: 処理範囲（秒）。
+      start は動画開始からの秒、end は絶対秒（0 = 最後まで）、
+      limit は start からの最大処理時間（0 = 無制限）。
+    - ``quiet``: フレーム毎・カード毎の進行表示を抑制する。
+    """
     error_handler = ErrorHandler()
 
     try:
-        print(f"動画読み込み中: {video_path}")
+        if not quiet:
+            print(f"動画読み込み中: {video_path}")
         with VideoReader(video_path) as reader:
             fps = reader.get_fps()
             frames_count = reader.get_frame_count()
-            print(f"  FPS: {fps}, フレーム数: {frames_count}")
+            if not quiet:
+                print(f"  FPS: {fps}, フレーム数: {frames_count}")
+
+            # フレーム範囲の決定（seek + デコード上限）
+            start_frame, stop_frame = compute_frame_range(
+                fps, frames_count, start_sec, end_sec, limit_sec
+            )
+            max_frames = stop_frame - start_frame + 1
+            if start_frame > 0:
+                reader.seek(start_frame)
+                if not quiet:
+                    print(f"  範囲: 開始 {start_sec}s → フレーム {start_frame}（シーク済み）")
+            if not quiet:
+                print(f"  範囲: フレーム {start_frame}..{stop_frame}（{max_frames} 枚）")
 
             extractor = FrameExtractor(reader, interval_sec=interval)
 
@@ -175,14 +216,16 @@ def process_video(video_path: str, ocr_engine: str = "meiki",
                     settings = load_settings()
                 diff_threshold = float(settings.get("video", {}).get("diff_threshold", 0.03))
                 diff_checker = DiffChecker(threshold=diff_threshold)
-                print(f"フレームをストリーミングし差分判定中（間隔: {interval}秒、閾値: {diff_threshold}）...")
+                if not quiet:
+                    print(f"フレームをストリーミングし差分判定中（間隔: {interval}秒、閾値: {diff_threshold}）...")
             else:
                 diff_checker = None
-                print(f"フレーム抽出中（間隔: {interval}秒、差分判定なし）...")
+                if not quiet:
+                    print(f"フレーム抽出中（間隔: {interval}秒、差分判定なし）...")
 
             frames = []
             total = 0
-            for frame in extractor.iter_frames():
+            for frame in extractor.iter_frames(max_frames=max_frames):
                 total += 1
                 if diff_checker is not None:
                     if diff_checker.is_different(frame):
@@ -190,21 +233,30 @@ def process_video(video_path: str, ocr_engine: str = "meiki",
                         diff_checker.update(frame)
                 else:
                     frames.append(frame)
-            print(f"  計 {total} フレームを処理し、{len(frames)} フレームを採用")
+            if not quiet:
+                print(f"  計 {total} フレームを処理し、{len(frames)} フレームを採用")
 
             if ocr_engine not in ("meiki", "gemma4"):
                 error_handler.handle(ErrorLevel.USER_ERROR, f"不明なOCRエンジン: {ocr_engine}")
                 return {}
             if settings is None:
                 settings = load_settings()
-            name_ocr, name_ocr_low, fan_ocr = _build_ocr_engines(ocr_engine, settings)
+            name_ocr, name_ocr_low, fan_ocr = _build_ocr_engines(ocr_engine, settings, quiet=quiet)
 
             if detector is None:
-                print("カード検出器初期化中...")
+                if not quiet:
+                    print("カード検出器初期化中...")
                 detector = build_detector(settings)
 
             all_results = _process_frames(frames, detector, name_ocr, name_ocr_low,
-                                           fan_ocr, output_dir, debug)
+                                           fan_ocr, output_dir, debug, quiet=quiet)
+
+            # OCR キャッシュ統計（有効な場合）
+            for eng in (name_ocr, name_ocr_low, fan_ocr):
+                if isinstance(eng, CachingOCR):
+                    s = eng.stats
+                    rate = (s["hits"] / (s["hits"] + s["misses"]) * 100) if (s["hits"] + s["misses"]) else 0.0
+                    print(f"OCRキャッシュ ({eng.name}): ヒット {s['hits']} / ミス {s['misses']}（キャッシュ種別 {s['unique']}、ヒット率 {rate:.0f}%）")
 
             print(f"\n処理完了: 計 {sum(len(r['cards']) for r in all_results)} 件のカード")
 
@@ -243,6 +295,14 @@ def main():
     parser.add_argument("--format", "-f", choices=["json", "csv", "all"], default="all")
     parser.add_argument("--ocr", "-O", choices=["meiki", "gemma4"], default="meiki")
     parser.add_argument("--interval", "-i", type=float, default=default_interval, help="抽出間隔（秒）")
+    parser.add_argument("--start", type=float, default=0.0, metavar="SEC",
+                        help="処理開始位置（動画開始からの秒、デフォルト 0）")
+    parser.add_argument("--end", type=float, default=0.0, metavar="SEC",
+                        help="処理終了位置（動画開始からの絶対秒、0 未満 = 最後まで）")
+    parser.add_argument("--limit", type=float, default=0.0, metavar="SEC",
+                        help="処理の最大時間（start からの秒、0 未満 = 無制限）")
+    parser.add_argument("--quiet", "-q", action="store_true", default=False,
+                        help="フレーム毎・カード毎の進行表示を抑制（エラーとサマリーは表示）")
     parser.add_argument("--diff", "-d", action="store_true", default=True, help="差分判定有効")
     parser.add_argument("--no-diff", action="store_true", help="差分判定無効")
     parser.add_argument("--debug", "-D", action="store_true", default=False, help="デバッグモード（フレームとcrop画像を保存）")
@@ -265,7 +325,11 @@ def main():
         debug=args.debug,
         settings=settings,
         name_mapping_file=args.name_mapping_file,
-        no_name_mapping=args.no_name_mapping
+        no_name_mapping=args.no_name_mapping,
+        start_sec=args.start,
+        end_sec=args.end,
+        limit_sec=args.limit,
+        quiet=args.quiet,
     )
 
 
