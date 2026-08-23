@@ -140,7 +140,7 @@ name_mapping:
 # 全テスト（E2E slow は MOV_E2E=1 でオプトイン）
 pytest -q
 
-# フル動画 E2E（数分〜十数分かかる）
+# フル動画 E2E（数十秒〜数分かかる）
 $env:MOV_E2E="1"; pytest -m slow
 ```
 

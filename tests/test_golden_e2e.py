@@ -1,7 +1,7 @@
 """ゴールデン回帰テスト (E2E): フル動画で本番パイプラインを走らせ、ファン数の値集合が安定していることを保証する。
 
 - 名前表記は OCR により揺れるため、**ファンカウントの値集合（unique）** のみを比較する。
-- 実行時間が長い（数十秒〜数分）ため `slow` マーカー付き。
+- 実行時間がかかる（数十秒〜数分）ため `slow` マーカー付き。
 - デフォルトではスキップ（オプトイン: 環境変数 ``MOV_E2E=1`` を付けて実行）。
   動画ファイルが無い、または meikiocr が無い環境でも自動的にスキップする。
 
@@ -39,7 +39,7 @@ def golden_fans():
 def test_e2e_fan_counts_match_golden(golden_fans, tmp_path):
     # オプトイン: デフォルトでは実行しない
     if os.environ.get("MOV_E2E") != "1":
-        pytest.skip("E2E は MOV_E2E=1 でオプトインして実行します（長時間実行）")
+        pytest.skip("E2E は MOV_E2E=1 でオプトインして実行します（数十秒〜数分）")
 
     video = _video()
     if not video.exists():
