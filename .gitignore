@@ -1,29 +1,48 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
-build/
-dist/
+.pytest_tmp/
 tmp/
 wheels/
 *.egg-info
-output/**
-!output/**/
-!output/**/.gitkeep
-input/**
-!input/memberReplace.json
-!input/memberList.txt
-!input/.gitkeep
+
+# PyInstaller ビルド成果物
+# 注意: spec / entry_cli.py / entry_gui.py の 3 点は CI ビルドに必須なので除外する
+# （build/ 丸ごと無視すると CI が spec を見つけられず失敗する = 過去に実際発生した罠）
+build/*
+!build/mov-to-fan-count.spec
+!build/entry_cli.py
+!build/entry_gui.py
+dist/
+
 # Virtual environments
 .venv
 .coverage
 
-# AI関連
+# ランタイムの入出力（ユーザーデータ / テスト出力）
+input/**
+!input/memberReplace.json
+!input/memberList.txt
+!input/.gitkeep
+output/*
+!output/.gitkeep
+inputans
+local_exe_out/
+ci_exe_out/
+
+# name_mapping.json はユーザー別データ（初回実行時に作成。zip に同梱しない）
+config/name_mapping.json
+
+# 機械学習モデル（scripts/download_models.py で取得。リポジトリには含めない）
+models/
+
+# 開発ドキュメント / 開発ログ（公開しない・ローカルのみ保持）
+docs/
+
+# AI関連 / ローカルツール
 opencode.json
 AGENTS.md
-docs/
-config/
 llama/
-models/
 run_*.ps1
 Bug-Dashboard.md
 .obsidian/
@@ -33,9 +52,30 @@ pytest_output.txt
 
 node_modules/
 old
-.obsidian
 .pytest*
-inputans
-inputmov
-output/*
-!output/.gitkeep
+inputmov/*
+!inputmov/.gitkeep
+
+# ローカルエージェント設定
+.claude/
+
+# 開発用プローブスクリプト（exe コンパイル / CI に不要）
+# make_synth_video.py（CI E2E 合成動画）と download_models.py（CI モデル取得）は必須なので除外
+scripts/*
+!scripts/make_synth_video.py
+!scripts/download_models.py
+
+# ローカルログ
+error.log
+
+# pytest ローカル設定（tmp_path の basetemp を .pytest_tmp/ に固定）
+# CI の test ジョブも同じ設定で走らせるため、conftest.py は git 管理対象。
+# （conftest.py を import する tests/test_conftest*.py も CI で実行可能）
+
+# 旧ゴールデンテスト資産（削除済み。make_golden.py による再生成を git 管理から除外）
+tests/golden/
+
+# テスト生成ツール用の開発用ファイル（dot files + 状態/レポート）
+tests/.*
+tests/PAUSE_STATE.md
+tests/TEST_GENERATION_REPORT.md

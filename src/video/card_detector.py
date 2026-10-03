@@ -7,9 +7,9 @@ from typing import Optional
 @dataclass
 class Card:
     """1枚のユーザカードの情報"""
-    role: str                # "member" | "leader"
-    badge_box: tuple         # バッジのボックス (x, y, w, h)
-    name_box: tuple          # ユーザ名 OCR 領域 (x, y, w, h)
+    role: str                 # "member" | "leader"
+    badge_box: tuple          # バッジのボックス (x, y, w, h)
+    name_box: Optional[tuple]  # ユーザ名 OCR 領域 (x, y, w, h) / 範囲外等で確定できない場合は None
     fan_box: Optional[tuple]  # ファン数 OCR 領域 (x, y, w, h) / None
 
 
@@ -189,13 +189,25 @@ class CardDetector:
             l_peaks = self._find_peaks(res_l, self.badge_threshold, s)
             for x, y, _sm in m_peaks:
                 cands.append([ox + x, oy + y, s,
-                              float(res_m[y, x]), float(res_l[y, x])])
+                              float(res_m[y, x]), self._sample(res_l, y, x)])
             for x, y, _sl in l_peaks:
                 gx, gy = ox + x, oy + y
                 if not self._close(cands, gx, gy, int(24 * s)):
                     cands.append([gx, gy, s,
-                                  float(res_m[y, x]), float(res_l[y, x])])
+                                  self._sample(res_m, y, x), float(res_l[y, x])])
         return cands
+
+    @staticmethod
+    def _sample(res, y: int, x: int) -> float:
+        """別のテンプレートの結果マップを境界チェック付きで参照する。
+
+        member(123px)/leader(124px) テンプレートの幅差で結果マップは
+        幅が 0〜1px 異なり、右端列が片方のマップだけ存在し得る。
+        範囲外の位置は 0.0（= そのテンプレートには非対応）として扱う。
+        """
+        if 0 <= y < res.shape[0] and 0 <= x < res.shape[1]:
+            return float(res[y, x])
+        return 0.0
 
     def _cands_to_badges(self, cands: list) -> list:
         """候補 [(x, y, bw, bh, role)] リストに変換（role: sm >= sl → member）。"""

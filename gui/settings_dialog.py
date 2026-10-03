@@ -1,7 +1,8 @@
 import customtkinter as ctk
 import yaml
-from pathlib import Path
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
+
+from src.utils.app_paths import data_path
 
 
 class SettingsDialog(ctk.CTkToplevel):
@@ -12,7 +13,10 @@ class SettingsDialog(ctk.CTkToplevel):
         self.geometry("500x900")
         self.resizable(False, False)
 
-        self.settings_file = Path(__file__).parent.parent / "config" / "settings.yaml"
+        # frozen（exe）時は exe 同置 / _internal 同梱の順で解決し、
+        # MainWindow._load_settings と同じファイルを必ず読む
+        # （__file__ 基準だと frozen 時に _internal 内を指して不整合になる）
+        self.settings_file = data_path("config/settings.yaml")
         self.config = self._load_settings()
 
         self._setup_ui()
@@ -24,14 +28,44 @@ class SettingsDialog(ctk.CTkToplevel):
         return {}
 
     def _save_settings(self):
-        self.config["video"]["frame_interval"] = float(self.interval_var.get())
-        self.config["video"]["enable_diff_check"] = self.diff_var.get()
-        self.config["video"]["diff_threshold"] = float(self.diff_threshold_var.get())
-        self.config["video"]["diff_only"] = self.diff_only_var.get()
-        self.config["ocr"]["engine"] = self.ocr_engine_var.get()
+        # 数値入力の解析はすべて設定の書き換え前に実施し、
+        # 失敗時はエラー表示して設定を書き換えない（中途半端な状態を防ぐ）
+        try:
+            interval = float(self.interval_var.get())
+            diff_threshold = float(self.diff_threshold_var.get())
+            mapping_threshold = int(self.name_mapping_threshold_var.get())
+        except ValueError:
+            messagebox.showerror(
+                "設定エラー",
+                "フレーム間隔・差分閾値・編集距離閾値には有効な数値を入力してください。",
+            )
+            return
 
         region_enabled = self.text_region_var.get()
         use_percent = self.region_unit_var.get() == "percent"
+
+        if region_enabled:
+            try:
+                left = float(self.region_left_var.get())
+                top = float(self.region_top_var.get())
+                right = float(self.region_right_var.get())
+                bottom = float(self.region_bottom_var.get())
+            except ValueError:
+                messagebox.showerror(
+                    "設定エラー",
+                    "テキスト領域の座標には有効な数値を入力してください。",
+                )
+                return
+        else:
+            left = top = right = bottom = 0.0
+
+        video = self.config.setdefault("video", {})
+        ocr = self.config.setdefault("ocr", {})
+        video["frame_interval"] = interval
+        video["enable_diff_check"] = self.diff_var.get()
+        video["diff_threshold"] = diff_threshold
+        video["diff_only"] = self.diff_only_var.get()
+        ocr["engine"] = self.ocr_engine_var.get()
 
         # settings.yaml に text_region セクションがなくても保存できるようにする
         # （旧アーキテクチャのセクションであり、コアコードは読まない）
@@ -40,11 +74,6 @@ class SettingsDialog(ctk.CTkToplevel):
         text_region["use_percent"] = use_percent
 
         if region_enabled:
-            left = float(self.region_left_var.get())
-            top = float(self.region_top_var.get())
-            right = float(self.region_right_var.get())
-            bottom = float(self.region_bottom_var.get())
-
             if use_percent:
                 text_region["left"] = left
                 text_region["top"] = top
@@ -61,10 +90,12 @@ class SettingsDialog(ctk.CTkToplevel):
         name_mapping_section = self.config.setdefault("name_mapping", {})
         name_mapping_section["file"] = self.name_mapping_file_var.get().strip()
         name_mapping_section["enable"] = self.name_mapping_enable_var.get()
-        name_mapping_section["edit_distance_threshold"] = int(self.name_mapping_threshold_var.get())
+        name_mapping_section["edit_distance_threshold"] = mapping_threshold
         name_mapping_section["warn_on_approx"] = self.name_mapping_warn_var.get()
         name_mapping_section["unmapped_action"] = self.name_mapping_action_var.get()
 
+        # frozen 環境で settings ファイルが未同梱の場合はディレクトリが存在しない
+        self.settings_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.settings_file, 'w', encoding='utf-8') as f:
             yaml.dump(self.config, f, allow_unicode=True, default_flow_style=False)
 
@@ -122,6 +153,34 @@ class SettingsDialog(ctk.CTkToplevel):
         self.ocr_engine_var = ctk.StringVar(value=self.config.get("ocr", {}).get("engine", "meiki"))
         ocr_menu = ctk.CTkOptionMenu(ocr_frame, values=ocr_choices, variable=self.ocr_engine_var, width=150)
         ocr_menu.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+
+        # gemma4 は未実装のため、ドロップダウン内で灰色表示にしてクリック不可にする
+        self._disable_option_menu_item(ocr_menu, "gemma4")
+
+        ctk.CTkLabel(
+            ocr_frame,
+            text="gemma4 は未実装のため選択できません",
+            font=("Arial", 10),
+            text_color=("gray55", "gray45"),
+        ).grid(row=2, column=0, padx=10, pady=(0, 5), sticky="w")
+
+    @staticmethod
+    def _disable_option_menu_item(menu: ctk.CTkOptionMenu, value: str):
+        """CTkOptionMenu のドロップダウン内の項目を無効化する（灰色・クリック不可）。
+
+        customtkinter の ``CTkOptionMenu`` は内部で ``tkinter.Menu`` を用いて
+        ドロップダウンを構築するため、``entryconfigure`` で該当エントリの
+        ``state`` を ``disabled`` にできる。項目ラベルは余白用に ljust されて
+        いるため、``strip`` して一致判定する。
+        """
+        dropdown = menu._dropdown_menu  # tkinter.Menu
+        # 項目数は index("end")（最後のインデックス）+ 1
+        for index in range(dropdown.index("end") + 1):
+            label = str(dropdown.entryconfigure(index, "label")[-1]).strip()
+            if label == value:
+                dropdown.entryconfigure(index, state="disabled",
+                                        foreground="#808080")
+                return
 
     def _create_text_region_settings(self, parent):
         region_frame = ctk.CTkFrame(parent)

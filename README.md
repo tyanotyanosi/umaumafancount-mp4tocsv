@@ -16,6 +16,8 @@
 依存パッケージ（`pip` で自動インストール）:
 `opencv-python` / `meikiocr` / `customtkinter` / `Pillow` / `pyyaml`
 
+> OCR エンジン `gemma4` は任意（後述）。
+
 ## インストール
 
 ```bash
@@ -41,15 +43,38 @@ mov-to-fan-count -v "path/to/video.mp4" -o output
 - `output/json/result_<timestamp>.json` — `{ "ユーザ名": ファン数, ... }`
 - `output/csv/result_<timestamp>.csv` — `ユーザ名,ファン数` の行
 
+> JSON と CSV は**既定で両方書き出される**（`--format all`）。
+> `--format` で `json` / `csv` のいずれか一方のみに限定できます。
+
+## Windows exe 版（Python 不要 / オフライン動作）
+
+Python をインストールしない PC で使う場合、[GitHub Releases](releases) の
+`mov-to-fan-count-v1.0.0-win64.zip` をダウンロードして使う。
+
+- exe 版は **v1.0.0 以降** のリリースから公開される
+  （v0.0.x のリリースは旧アーキテクチャ時代のソース配布で、exe は含まれない）
+
+1. zip を任意のフォルダに解凍（移動していても問題ない）
+2. `mov-to-fan-count-gui.exe` をダブルクリック（初回起動は 10〜30 秒）
+3. 動画を選択し「動画処理」→ 結果を JSON / CSV で保存
+
+- OCR に使う meiki モデル（約 46 MB）は exe に同梱されているため、
+  **ネットワーク接続は不要**（オフラインで初回から動作）
+- `config\settings.yaml` / `template\*.png` は exe の隣に同梱されており、
+  テキストエディタで編集できる（exe 内部同梱版より優先される）
+- `mov-to-fan-count.exe` が CLI 版（コンソール）。オプションは後述と同じ
+- 詳細・トラブルシュート: `user-guide/usage.txt`
+  （zip 内には「使い方.txt」として同梱）
+
 ## CLI オプション
 
 | オプション | 説明 |
 |---|---|
 | `--video, -v` | 入力動画パス（必須） |
 | `--output, -o` | 出力ディレクトリ（既定 `output`） |
-| `--format, -f` | `json` / `csv` / `all`（既定 `all`） |
+| `--format, -f` | `json` / `csv` / `all`（既定 `all`）— 書き出すフォーマットを選択 |
 | `--ocr, -O` | OCR エンジン: `meiki` / `gemma4`（既定 `meiki`） |
-| `--interval, -i` | 抽出間隔（秒、既定は設定ファイルの `frame_interval`） |
+| `--interval, -i` | 抽出間隔（秒、既定は設定ファイルの `frame_interval`、0 = サンプリングせず差分判定のみで採用を決定） |
 | `--start` | 処理開始位置（動画開始からの秒、既定 0） |
 | `--end` | 処理終了位置（動画開始からの絶対秒、0 未満 = 最後まで） |
 | `--limit` | 処理の最大時間（start からの秒、0 未満 = 無制限） |
@@ -76,23 +101,53 @@ mov-to-fan-count -v video.mp4 --start 60 --end 120
 mov-to-fan-count -v video.mp4 --quiet -o output
 ```
 
+> CLI の間隔は `--interval` と `video.frame_interval` で決まる
+> （`0` = サンプリングせず差分判定のみ）。設定ファイルの `video.diff_only` は
+> **GUI 専用**で CLI には影響しない。
+
+### OCR エンジン
+
+- `meiki`（既定）— `meikiocr` パッケージ。ユーザ名用・ファン数用の別閾値の
+  ラッパーを使い、ユーザ名の読み取りに失敗した場合は低閾値
+  （`name_det_threshold_low` / `name_rec_threshold_low`）で再認識する。
+- `gemma4`（オプション）— `pip install -e ".[gemma4]"`（`torch` / `transformers`）
+  が必要。**現在は使用不可**（認識結果は空文字を返す）。
+
 ## 名前マッピング
 
-OCR の誤読（例: 「ろん」→「たけし」）を、ユーザ定義のマッピング定義で実ユーザ名に
+OCR の誤読（例: 「のびた」→「のび太」）を、ユーザ定義のマッピング定義で実ユーザ名に
 正しくする機能。
 
-- 定義ファイル: `config/name_mapping.json`（ユーザが編集）
+- 定義ファイル: `config/name_mapping.json`（ユーザが編集、JSON 形式）
 - 有効化・閾値: `config/settings.yaml` の `name_mapping` セクション
   - `enable: true`、`edit_distance_threshold: 2`（近似一致のレーベンシュタイン距離）
+  - `warn_on_approx: true`（近似一致時に警告を出力）
   - `unmapped_action: suggest` / `keep` / `drop`
-- 近似一致は警告を出力、未マッピング検知は `suggest` では集計に含まれない
+- 近似一致は警告を出力、`suggest` では未マッピング検知は集計に含まれない
+  （一覧として末尾に表示）、`keep` は検知名のまま集計、`drop` は除外
+
+定義ファイルの例（`config/name_mapping.json`）:
+
+```json
+{
+  "user_names": {
+    "のび太": { "aliases": ["のび太", "のびた", "のび", "Nobita"] }
+  },
+  "raw_to_user": {
+    "固定の検知名A": "ジャイアン"
+  }
+}
+```
+
+- `user_names` — 実ユーザ名 → OCR 検知名候補（`aliases`）。完全一致を優先し、
+  一致なしの場合は編集距離 ≤ `edit_distance_threshold` で近似一致を試みる
+- `raw_to_user` — 検知名 → 実ユーザ名の直接対応表（完全一致）
 
 ## 設定（config/settings.yaml）
 
 ```yaml
 video:
-  frame_interval: 0        # 0 = 差分判定のみで採用フレームを決定
-  enable_diff_check: true
+  frame_interval: 0        # 0 = サンプリングしない（差分判定のみで採用を決定）
   diff_threshold: 0.03     # 静止区間ノイズ床より上、スクロールステップより下
 
 card_detection:
@@ -102,8 +157,8 @@ card_detection:
   icon_match_threshold: 0.7
   max_cards: 3
   reference_width: 2560    # テンプレート撮影時のフレーム幅（スケール先行推定）
-  multi_scale: true
-  scale_cache: true
+  multi_scale: true        # マルチスケール検出の総スイッチ
+  scale_cache: true        # 勝者スケールをフレーム間でキャッシュ
 
 ocr:
   engine: meiki
@@ -120,53 +175,33 @@ name_mapping:
   file: "config/name_mapping.json"
   enable: true
   edit_distance_threshold: 2
+  warn_on_approx: true
   unmapped_action: "suggest"
 ```
 
-## 処理パイプライン
+> 上記は抜粋。実際のファイルには `card_detection` の余白・ウィンドウ
+> （`edge_margin` / `name_margin` / `scale_window_low` / `coarse_to_fine` 等）、
+> `ocr.gemma4`、`output` 等の追加項目がある。
 
-1. **VideoReader** — 動画のデコード（`src/video/reader.py`）
-2. **FrameExtractor** — 間隔サンプリング／範囲指定（`--start/--end/--limit`）（`src/video/extractor.py`）
-3. **DiffChecker** — フレーム全体の差分で冗長フレームを除外（`src/video/diff_checker.py`）
-4. **CardDetector** — 多スケールテンプレートマッチングでカードを検出（`src/video/card_detector.py`）
-5. **OCR** — meiki でカード内のユーザ名・ファン数を認識（`src/ocr/meiki_ocr.py`）。
-   `ocr.cache` 有効時は crop ハッシュで同一 crop の再認識を省略（`src/ocr/cache.py`）
-6. **ResultParser** — カード結果の正規化・多数決・桁混同補正（`src/parser/result_parser.py`）
-7. **出力** — JSON / CSV（`cli/main.py`）
+## GUI
 
-## テスト
+`mov-to-fan-count-gui`（customtkinter 製）。動画を選択し「動画処理」を実行すると、
+meiki エンジン＋差分判定でユーザ名とファン数を抽出し、テーブルに表示する。
+JSON / CSV へのエクスポートも可能。
 
 ```bash
-# 全テスト（E2E slow は MOV_E2E=1 でオプトイン）
-pytest -q
-
-# フル動画 E2E（数十秒〜数分かかる）
-$env:MOV_E2E="1"; pytest -m slow
+mov-to-fan-count-gui
 ```
 
-- `tests/test_golden_detection.py` — ゴールデン検出回帰（9 サンプルフレーム）
-- `tests/test_golden_e2e.py` — フル動画 E2E（`slow` マーカー、`MOV_E2E=1` で実行）
-- `tests/golden/` — ゴールデン資産（サンプルフレーム・期待結果 JSON）
-- `scripts/make_golden.py` — 検出ゴールデンの再生成（検出ロジック変更時の差分確認用）
+サンプリング間隔は `config/settings.yaml` で決まる:
+`video.diff_only: true` → 間隔サンプリングなし（interval 0）で全フレームを
+差分判定に任せる。そうでない場合は `video.frame_interval` のサンプリング＋
+差分判定を行う。
 
 ## 出力例
 
 ```json
 {
-    "たけし": 3249444186
+    "のび太": 3249444186
 }
-```
-
-## ディレクトリ構成
-
-```
-cli/main.py          # CLI エントリポイント
-src/video/           # 動画読み込み・フレーム抽出・差分判定・カード検出
-src/ocr/             # OCR ラッパー（meiki / gemma4 / キャッシュ）
-src/parser/          # 結果パース（多数決・桁混同補正）
-config/              # 設定（settings.yaml / name_mapping.json）
-template/            # カード検出テンプレート（4 画像）
-tests/               # テスト + ゴールデン資産
-scripts/             # 補助スクリプト（make_golden など）
-docs/                # 設計・開発ログ・改善提案
 ```

@@ -1,0 +1,126 @@
+name: Build Windows EXE
+
+# v* タグ push で GitHub Release を公開 / 手動実行は検証用に開放
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------- fast テスト（リリースゲート） ----------
+  test:
+    name: pytest (fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Install xvfb (GUI テスト用ディスプレイ)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install dependencies (uv.lock 固定 / dev extra で pytest 導入)
+        run: uv sync --frozen --extra dev
+      - name: Run fast tests
+        run: xvfb-run -a uv run pytest -q -m "not slow"
+
+  # ---------- EXE ビルド（Windows amd64） ----------
+  build-exe:
+    name: Build EXE (Windows amd64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies (uv.lock 固定 / build extra)
+        run: uv sync --frozen --extra build
+
+      - name: Download meiki models (exe 同梱用)
+        run: uv run python scripts/download_models.py models
+
+      - name: Build EXE (PyInstaller onedir)
+        run: uv run pyinstaller build/mov-to-fan-count.spec --noconfirm
+
+      - name: "Smoke: CLI exe --help"
+        shell: pwsh
+        run: |
+          & ".\dist\mov-to-fan-count\mov-to-fan-count.exe" --help
+          if ($LASTEXITCODE -ne 0) { throw "CLI exe --help failed" }
+
+      - name: "E2E: 動画を本物の exe で処理（オフライン・同梱モデル）"
+        shell: pwsh
+        run: |
+          $video = (Get-ChildItem -Path inputmov -Filter *.mp4 -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          if (-not $video) {
+            # inputmov/ は gitignore（ユーザー動画は公開しない）のため、
+            # リポジトリ上の動画が無い場合は合成動画で E2E を実行する
+            uv run python scripts/make_synth_video.py
+            $synth = "output/synthetic.mp4"
+            if (-not (Test-Path $synth)) { throw "合成動画の生成に失敗しました" }
+            Write-Host "inputmov/ に動画がないため合成動画で E2E: $synth"
+            $video = $synth
+          }
+          & ".\dist\mov-to-fan-count\mov-to-fan-count.exe" -v $video -o ci_exe_out -q
+          if ($LASTEXITCODE -ne 0) { throw "exe E2E failed" }
+          $json = Get-ChildItem -Path ci_exe_out\json -Filter *.json -ErrorAction SilentlyContinue |
+                  Select-Object -First 1
+          if (-not $json) { throw "exe E2E の JSON 出力が無い" }
+          Write-Host "E2E JSON: $($json.FullName)"
+
+      - name: "Smoke: GUI exe が起動し続ける"
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath ".\dist\mov-to-fan-count\mov-to-fan-count-gui.exe" -PassThru
+          Start-Sleep -Seconds 30
+          if ($p.HasExited) { throw "GUI exe が即死: exit=$($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "GUI exe started OK"
+
+      - name: 配布 ZIP を作成
+        shell: pwsh
+        run: |
+          $app = "dist\mov-to-fan-count"
+          # exe 同置の編集可能コピー（_internal 同梱版より優先される）
+          New-Item -ItemType Directory -Force -Path "$app\config"  | Out-Null
+          Copy-Item config\settings.yaml "$app\config\settings.yaml" -Force
+          New-Item -ItemType Directory -Force -Path "$app\template" | Out-Null
+          Copy-Item template\*.png "$app\template\" -Force
+          # 日本語の使い方（docs/ は公開しないためリポジトリルートに配置）
+          Copy-Item user-guide\usage.txt "$app\使い方.txt" -Force
+          # バージョンラベル: tag 名 / なければ ci 日付
+          if ("${{ github.ref_name }}" -ne "") { $v = "${{ github.ref_name }}" }
+          else { $v = "ci-$(Get-Date -Format yyyyMMddHHmm)" }
+          Compress-Archive -Path "$app" -DestinationPath "mov-to-fan-count-$v-win64.zip"
+          $z = Get-Item "mov-to-fan-count-$v-win64.zip"
+          "ZIP: $($z.Name) ($([math]::Round($z.Length / 1MB, 1)) MB)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mov-to-fan-count-win64
+          path: mov-to-fan-count-*win64.zip
+
+  # ---------- Release 公開（tag の場合のみ・test をゲートに） ----------
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [test, build-exe]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mov-to-fan-count-win64
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.zip"
+          name: "Release ${{ github.ref_name }}"
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -18,13 +18,14 @@ def compute_frame_range(fps: float, total_frames: int, start_sec: float = 0.0,
         raise ValueError("動画にフレームがありません")
     fps = max(0.0, float(fps))
 
-    start_frame = int(round(start_sec * fps))
+    # start_frame を先にクランプしてから stop を計算する
+    # （負の start で limit 計算がずれるのを防ぐ）
+    start_frame = max(0, int(round(start_sec * fps)))
     end_frame = int(round(end_sec * fps)) if end_sec > 0 else total_frames - 1
     stop = end_frame
     if limit_sec > 0:
         stop = min(stop, start_frame + int(round(limit_sec * fps)))
 
-    start_frame = max(0, start_frame)
     stop = max(0, stop)
     if stop >= total_frames:
         stop = total_frames - 1

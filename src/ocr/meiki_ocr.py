@@ -18,7 +18,16 @@ class MeikiOCRWrapper(OCRBase):
     def recognize_with_confidence(self, image) -> list:
         """信頼度付きで文字を認識"""
         results = self.engine.run_ocr(image, det_threshold=self.det_threshold, rec_threshold=self.rec_threshold)
-        return [
-            {"text": line['text'], "confidence": line.get('confidence', 0.0)}
-            for line in results if line['text']
-        ]
+        lines = []
+        for line in results:
+            if not line['text']:
+                continue
+            # meikiocr 0.3.4 は行レベルの信頼度を持たないため、
+            # 行内文字の conf を平均して行信頼度とする
+            chars = line.get('chars') or []
+            if chars:
+                conf = sum(float(c.get('conf', 0.0)) for c in chars) / len(chars)
+            else:
+                conf = 0.0
+            lines.append({"text": line['text'], "confidence": conf})
+        return lines

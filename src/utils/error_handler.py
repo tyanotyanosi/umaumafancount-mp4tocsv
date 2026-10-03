@@ -16,18 +16,21 @@ class ErrorHandler:
         self.logger = logging.getLogger("mov-to-fan-count")
         self.logger.setLevel(logging.DEBUG)
 
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
+        # 共有ロガーにハンドラを多重追加しない
+        # （インスタンス毎に追加するとログが重複する）
+        if not self.logger.handlers:
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setLevel(logging.DEBUG)
 
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
 
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            console_handler.setFormatter(formatter)
 
-        self.logger.addHandler(file_handler)
-        self.logger.addHandler(console_handler)
+            self.logger.addHandler(file_handler)
+            self.logger.addHandler(console_handler)
 
     def handle(self, level: ErrorLevel, message: str, exc: Optional[Exception] = None):
         """エラー処理"""

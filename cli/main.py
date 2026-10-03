@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 import cv2
 import yaml
@@ -11,23 +12,42 @@ from src.ocr.meiki_ocr import MeikiOCRWrapper
 from src.ocr.gemma4 import Gemma4Wrapper
 from src.ocr.cache import CachingOCR
 from src.parser.result_parser import ResultParser
-from src.parser.name_mapper import NameMapper, NameMapperLoader
+from src.parser.name_mapper import NameMapper, NameMapperLoader, ensure_name_mapping_file
 from src.output.json_writer import JSONWriter
 from src.output.csv_writer import CSVWriter
 from src.utils.error_handler import ErrorHandler, ErrorLevel
+from src.utils.app_paths import data_path
 
 
-def load_settings(settings_path: str = "config/settings.yaml") -> dict:
-    """設定ファイルを読み込み"""
-    with open(settings_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+def load_settings(settings_path: str | None = None) -> dict:
+    """設定ファイルを読み込み。
+
+    ファイルが存在しない / 空 / 不正な YAML の場合は空 dict を返す
+    （全設定はデフォルト値で動くため、クラッシュせずに続行する）。
+
+    ``settings_path`` 未指定時は exe 対応パス解決（app_paths.data_path）で
+    ``config/settings.yaml`` を探す（exe 同置 → _internal 同梱の順）。
+    """
+    p = Path(settings_path) if settings_path else data_path("config/settings.yaml")
+    if not p.exists():
+        logging.getLogger(__name__).warning(
+            "設定ファイルが見つかりません: %s（デフォルト値を使用）", p)
+        return {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as e:
+        logging.getLogger(__name__).warning(
+            "設定ファイルの読み込みに失敗しました: %s（デフォルト値を使用）: %s", p, e)
+        return {}
 
 
 def build_detector(settings: dict) -> CardDetector:
     """settings から CardDetector を生成"""
     cd = settings.get("card_detection", {}) if settings else {}
     template_dir = cd.get("template_dir", "template")
-    return CardDetector(template_dir=template_dir, settings=settings)
+    # exe 同置 / exe 内同梱の順でテンプレートを解決（絶対パス指定も尊重）
+    return CardDetector(template_dir=str(data_path(template_dir)), settings=settings)
 
 
 def build_name_mapper(settings: dict, name_mapping_file: str = None,
@@ -42,6 +62,10 @@ def build_name_mapper(settings: dict, name_mapping_file: str = None,
     if no_name_mapping or not nm.get("enable", False):
         return None
     path = name_mapping_file or nm.get("file", "config/name_mapping.json")
+    # exe 同置 / exe 内同梱の順で解決（絶対パス指定も尊重）
+    path = str(data_path(path))
+    # 初回実行時にマッピング定義ファイルを作成（ユーザー別データ）
+    ensure_name_mapping_file(path)
     mapping = NameMapperLoader.load_mapping(path)
     return NameMapper(
         mapping=mapping,
@@ -159,20 +183,28 @@ def _process_frames(frames, detector: CardDetector, name_ocr, name_ocr_low, fan_
     return all_results
 
 
-def _write_outputs(merged: dict, output_dir: str) -> tuple:
-    """JSON/CSV を書き出し、パスを返す。"""
-    json_writer = JSONWriter(Path(output_dir) / "json")
-    csv_writer = CSVWriter(Path(output_dir) / "csv")
-    json_path = json_writer.write(merged)
-    csv_path = csv_writer.write(merged)
-    print(f"JSON出力: {json_path}")
-    print(f"CSV出力: {csv_path}")
+def _write_outputs(merged: dict, output_dir: str, fmt: str = "all") -> tuple:
+    """JSON/CSV を書き出し、パスを返す。
+
+    ``fmt`` は "all" / "json" / "csv"。"json" / "csv" を渡した場合、
+    該当フォーマットのみを書き出し、書かない方のパスは ``None`` を返す。
+    """
+    json_path = csv_path = None
+    if fmt in ("all", "json"):
+        json_writer = JSONWriter(Path(output_dir) / "json")
+        json_path = json_writer.write(merged)
+        print(f"JSON出力: {json_path}")
+    if fmt in ("all", "csv"):
+        csv_writer = CSVWriter(Path(output_dir) / "csv")
+        csv_path = csv_writer.write(merged)
+        print(f"CSV出力: {csv_path}")
     return json_path, csv_path
 
 
 def process_video(video_path: str, ocr_engine: str = "meiki",
                   interval: float = 1.0, use_diff: bool = True,
-                  output_dir: str = "output", debug: bool = False,
+                  output_dir: str = "output", fmt: str = "all",
+                  debug: bool = False,
                   detector: CardDetector = None,
                   settings: dict = None,
                   name_mapping_file: str = None,
@@ -276,7 +308,7 @@ def process_video(video_path: str, ocr_engine: str = "meiki",
                     for name in unmapped:
                         print(f"  - {name}")
 
-            _write_outputs(merged, output_dir)
+            _write_outputs(merged, output_dir, fmt)
 
             return merged
 
@@ -289,7 +321,7 @@ def main():
     settings = load_settings()
     default_interval = float(settings.get("video", {}).get("frame_interval", 1.0))
 
-    parser = argparse.ArgumentParser(description="ウマ娘の動画からファン人数を抽出")
+    parser = argparse.ArgumentParser(description="ウマ娘の動画から総獲得ファン数を抽出")
     parser.add_argument("--video", "-v", required=True, help="入力動画パス")
     parser.add_argument("--output", "-o", default="output", help="出力ディレクトリ")
     parser.add_argument("--format", "-f", choices=["json", "csv", "all"], default="all")
@@ -322,6 +354,7 @@ def main():
         interval=args.interval,
         use_diff=args.diff,
         output_dir=args.output,
+        fmt=args.format,
         debug=args.debug,
         settings=settings,
         name_mapping_file=args.name_mapping_file,

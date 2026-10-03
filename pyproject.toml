@@ -1,7 +1,7 @@
 [project]
 name = "mov-to-fan-count"
-version = "0.1.0"
-description = "ウマ娘の動画からファン人数をOCRで抽出するツール"
+version = "1.0.0"
+description = "ウマ娘の動画から総獲得ファン数をOCRで抽出するツール"
 requires-python = ">=3.11"
 dependencies = [
     "opencv-python>=4.8.0",
@@ -19,6 +19,9 @@ gemma4 = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+]
+build = [
+    "pyinstaller>=6.10,<7",
 ]
 
 [project.scripts]
@@ -38,3 +41,8 @@ include = ["src*", "cli*", "gui*"]
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]

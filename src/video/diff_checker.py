@@ -22,6 +22,10 @@ class DiffChecker:
         gray_current = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
         gray_last = cv2.cvtColor(self.last_frame, cv2.COLOR_BGR2GRAY)
 
+        if gray_current.shape != gray_last.shape:
+            # 解像度が途中で変わった場合 → 差分ありとして扱う
+            return True
+
         diff = cv2.absdiff(gray_current, gray_last)
         diff_rate = np.count_nonzero(diff) / (gray_current.shape[0] * gray_current.shape[1])
 

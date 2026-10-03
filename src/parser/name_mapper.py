@@ -127,7 +127,7 @@ class NameMapper:
             if self.warn_on_approx:
                 warning = (
                     f"近似一致 (edit_distance={dist}): "
-                    f"'{raw_name}' -> '{user_name}' (alias '{alias})'"
+                    f"'{raw_name}' -> '{user_name}' (alias '{alias}')"
                 )
             return MappedName(user_name, raw_name, True, "approx", alias, warning)
 
@@ -171,3 +171,26 @@ class NameMapperLoader:
                 f"マッピング定義ファイルはオブジェクトである必要があります: {path}"
             )
         return data
+
+
+def ensure_name_mapping_file(path: str | Path) -> Path:
+    """マッピング定義ファイルが存在しない場合はデフォルトテンプレートを作成する。
+
+    ユーザー別データのため zip に同梱せず、初回実行時に作成する。
+    作成時は空のマッピング（``user_names`` / ``raw_to_user`` が空）を
+    書き出す。ユーザーは以降に編集してマッピングを追加する。
+
+    Args:
+        path: マッピング定義ファイルのパス。
+
+    Returns:
+        ファイルパス。
+    """
+    p = Path(path)
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        default = {"user_names": {}, "raw_to_user": {}}
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(default, f, ensure_ascii=False, indent=2)
+        logger.info("マッピング定義ファイルを作成しました: %s", p)
+    return p

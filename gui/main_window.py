@@ -1,9 +1,11 @@
+import tkinter as tk
 import customtkinter as ctk
 from pathlib import Path
 
 from gui.video_player import VideoPreviewFrame
 from gui.result_view import ResultTableView
 from gui.settings_dialog import SettingsDialog
+from src.utils.app_paths import data_path, work_dir
 
 
 class MainWindow(ctk.CTk):
@@ -21,7 +23,8 @@ class MainWindow(ctk.CTk):
         self._setup_ui()
 
     def _load_settings(self):
-        settings_file = Path(__file__).parent.parent / "config" / "settings.yaml"
+        # frozen（exe）時は exe 同置 / _internal 同梱の順で解決
+        settings_file = data_path("config/settings.yaml")
         if settings_file.exists():
             import yaml
             with open(settings_file, 'r', encoding='utf-8') as f:
@@ -35,6 +38,13 @@ class MainWindow(ctk.CTk):
         self._create_toolbar()
         self._create_main_content()
         self._create_status_bar()
+
+        # ウィンドウクローズ時は動画キャプチャを解放（再生中のクローズでも安全に）
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        self.video_preview.close()
+        self.destroy()
 
     def _create_toolbar(self):
         toolbar = ctk.CTkFrame(self, height=50)
@@ -113,23 +123,51 @@ class MainWindow(ctk.CTk):
         else:
             interval = float(self.settings.get("video", {}).get("frame_interval", 1.0))
 
+        # OCR エンジンは設定（設定ダイアログで保存される ocr.engine）に従う
+        ocr_engine = str(self.settings.get("ocr", {}).get("engine", "meiki"))
+
         import threading
+
+        def _safe_after(func):
+            """ワーカースレッドから after を安全に実行（ウィンドウクローズ後は無視）。"""
+            try:
+                self.after(0, func)
+            except tk.TclError:
+                pass  # ウィンドウは既に破棄済み → UI 更新を諦める
+
+        def _still_exists():
+            try:
+                return self.winfo_exists()
+            except tk.TclError:
+                return False
 
         def process_thread():
             try:
                 from cli.main import process_video
                 result = process_video(
                     video_path=video_path,
-                    ocr_engine="meiki",
+                    ocr_engine=ocr_engine,
                     interval=interval,
                     use_diff=True,
-                    output_dir="output"
+                    # frozen（exe）時は exe 同置の output/ に出力
+                    output_dir=str(work_dir() / "output"),
+                    settings=self.settings,
                 )
-                self.after(0, lambda: self.set_result_data(result))
+
+                def _apply():
+                    if _still_exists():
+                        self.set_result_data(result)
+                _safe_after(_apply)
             except Exception as e:
-                self.after(0, lambda: self.status_label.configure(text=f"エラー: {e}"))
+                def _err():
+                    if _still_exists():
+                        self.status_label.configure(text=f"エラー: {e}")
+                _safe_after(_err)
             finally:
-                self.after(0, lambda: self.video_preview.btn_process.configure(state="normal"))
+                def _reenable():
+                    if _still_exists():
+                        self.video_preview.btn_process.configure(state="normal")
+                _safe_after(_reenable)
 
         threading.Thread(target=process_thread, daemon=True).start()
 
@@ -146,8 +184,11 @@ class MainWindow(ctk.CTk):
 
         if output_dir:
             from src.output.json_writer import JSONWriter
-            writer = JSONWriter()
-            path = writer.write(self.result_data, Path(output_dir).name)
+            target = Path(output_dir)
+            # ユーザが選択した保存先ディレクトリを尊重する
+            # （writer の既定ディレクトリにファイル名だけを書くと選択先が失われていた）
+            writer = JSONWriter(output_dir=str(target.parent))
+            path = writer.write(self.result_data, target.name)
             self.status_label.configure(text=f"JSON出力完了: {path}")
 
     def _output_csv(self):
@@ -163,8 +204,11 @@ class MainWindow(ctk.CTk):
 
         if output_dir:
             from src.output.csv_writer import CSVWriter
-            writer = CSVWriter()
-            path = writer.write(self.result_data, Path(output_dir).name)
+            target = Path(output_dir)
+            # ユーザが選択した保存先ディレクトリを尊重する
+            # （writer の既定ディレクトリにファイル名だけを書くと選択先が失われていた）
+            writer = CSVWriter(output_dir=str(target.parent))
+            path = writer.write(self.result_data, target.name)
             self.status_label.configure(text=f"CSV出力完了: {path}")
 
     def set_result_data(self, data: dict):

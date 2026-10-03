@@ -132,14 +132,15 @@ class ResultParser:
                     # 近似一致の警告を蓄積（同一メッセージは重複を省く）
                     if mapped.warning not in mapper.warnings:
                         mapper.warnings.append(mapped.warning)
-                if mapped and mapped.matched:
+                if mapped.matched:
                     _add(mapped.user_name, count)
                 elif unmapped_action == "drop":
                     # 集計・一覧双方から消去
                     continue
                 elif unmapped_action == "suggest":
-                    # 集計には含めず、未マッピング一覧に記録のみ
-                    mapper.unmapped_names.append(mapped.raw_name)
+                    # 集計には含めず、未マッピング一覧に記録のみ（同名の重複を除く）
+                    if mapped.raw_name not in mapper.unmapped_names:
+                        mapper.unmapped_names.append(mapped.raw_name)
                 else:  # keep
                     # 検知をそのまま実ユーザ名として集計に含める
                     _add(name, count)
