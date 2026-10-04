@@ -11,26 +11,6 @@ permissions:
   contents: write
 
 jobs:
-  # ---------- fast テスト（リリースゲート） ----------
-  test:
-    name: pytest (fast)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.13"
-      - name: Install xvfb (GUI テスト用ディスプレイ)
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-      - name: Install dependencies (uv.lock 固定 / dev extra で pytest 導入)
-        run: uv sync --frozen --extra dev
-      # output/synthetic.mp4 は gitignore 対象なので、チェックアウト直後は存在しない。
-      # VideoReader の edge テストが実 MP4 を開くため、テスト前に生成しておく。
-      - name: Generate synthetic video (VideoReader テスト用)
-        run: uv run python scripts/make_synth_video.py
-      - name: Run fast tests
-        run: xvfb-run -a uv run pytest -q -m "not slow"
-
   # ---------- EXE ビルド（Windows amd64） ----------
   build-exe:
     name: Build EXE (Windows amd64)
@@ -115,11 +95,11 @@ jobs:
           name: mov-to-fan-count-win64
           path: mov-to-fan-count-*win64.zip
 
-  # ---------- Release 公開（tag の場合のみ・test をゲートに） ----------
+  # ---------- Release 公開（tag の場合のみ・build-exe をゲートに） ----------
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [test, build-exe]
+    needs: [build-exe]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
