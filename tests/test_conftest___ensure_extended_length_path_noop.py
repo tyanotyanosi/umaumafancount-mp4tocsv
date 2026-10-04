@@ -27,11 +27,20 @@ missing（欠落情報）:
 import os
 import sys
 
+import pytest
+
 # 本テストは tests/ 配下からプロジェクトルートの conftest.py を直接 import する。
 # pytest の import モードに依存しないよう、プロジェクトルートを sys.path に確保する。
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
+
+# conftest.py の win32 専用パッチ（_ensure_extended_length_path_noop）は
+# sys.platform.startswith("win32") の下でのみ定義される。
+# ubuntu-latest の CI では import 時点で ImportError になり collection 全体が
+# 中断されるため、モジュールレベルで import 前にスキップする。
+if not sys.platform.startswith("win32"):
+    pytest.skip("win32 専用パッチのテスト", allow_module_level=True)
 
 from conftest import _ensure_extended_length_path_noop  # noqa: E402
 

@@ -1,5 +1,6 @@
 import argparse
 import logging
+import sys
 from pathlib import Path
 import cv2
 import yaml
@@ -318,6 +319,14 @@ def process_video(video_path: str, ocr_engine: str = "meiki",
 
 
 def main():
+    # 日本語 help/ログを、リダイレクト先（CI のパイプ = cp1252 等）でも
+    # UnicodeEncodeError にならないよう UTF-8 に固定する。
+    # exe エントリ(build/entry_cli.py)・console script・python -m cli.main を
+    # 全てカバーするため、エントリ側ではなくここに置く。
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     settings = load_settings()
     default_interval = float(settings.get("video", {}).get("frame_interval", 1.0))
 

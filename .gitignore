@@ -64,6 +64,17 @@ inputmov/*
 scripts/*
 !scripts/make_synth_video.py
 !scripts/download_models.py
+# tests/test_scripts_*.py が import するスクリプトは CI(fresh checkout) で必要なので追跡する
+!scripts/anchor_probe.py
+!scripts/diagnose_diff.py
+!scripts/extract_keyframes.py
+!scripts/make_contact_sheet.py
+!scripts/make_golden.py
+!scripts/measure_scroll.py
+!scripts/measure_shift.py
+!scripts/measure_tail.py
+!scripts/repro_gui_pause_crash.py
+!scripts/stack_names.py
 
 # ローカルログ
 error.log

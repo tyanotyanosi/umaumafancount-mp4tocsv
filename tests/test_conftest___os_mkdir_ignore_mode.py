@@ -33,17 +33,24 @@ missing（欠落情報）:
 import os
 import sys
 
+import pytest
+from unittest.mock import patch
+
 # 本テストは tests/ 配下からプロジェクトルートの conftest.py を直接 import する。
 # pytest の import モードに依存しないよう、プロジェクトルートを sys.path に確保する。
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+# conftest.py の win32 専用パッチ（_os_mkdir_ignore_mode）は
+# sys.platform.startswith("win32") の下でのみ定義される。
+# ubuntu-latest の CI では import 時点で ImportError になり collection 全体が
+# 中断されるため、モジュールレベルで import 前にスキップする。
+if not sys.platform.startswith("win32"):
+    pytest.skip("win32 専用パッチのテスト", allow_module_level=True)
+
 import conftest  # noqa: E402
 from conftest import _os_mkdir_ignore_mode  # noqa: E402
-
-import pytest
-from unittest.mock import patch
 
 
 def test_edge_01():

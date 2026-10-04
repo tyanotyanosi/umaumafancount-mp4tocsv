@@ -1,4 +1,4 @@
-"""Tests for ``src.parser.result_parser.ResultParser._correct_digit_confusion``.
+r"""Tests for ``src.parser.result_parser.ResultParser._correct_digit_confusion``.
 
 Specification: docs/00-Architecture/src_parser_result_parser__ResultParser__correct_digit_confusion.yaml
 
