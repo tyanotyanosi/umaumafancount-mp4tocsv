@@ -64,7 +64,14 @@ class CardDetector:
 
     def _load(self, template_dir: str, name: str) -> dict:
         path = f"{template_dir}/{name}"
-        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        # Windows の cv2.imread は非ASCII文字（日本語ユーザ名など）を含むパスを
+        # 開けない。ファイルのバイト列を np.fromfile で読み、cv2.imdecode で
+        # デコードする。
+        try:
+            data = np.fromfile(path, dtype=np.uint8)
+        except OSError:
+            raise FileNotFoundError(f"テンプレートが見つかりません: {path}")
+        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
         if img is None:
             raise FileNotFoundError(f"テンプレートが見つかりません: {path}")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)

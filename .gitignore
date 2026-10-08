@@ -14,6 +14,7 @@ build/*
 !build/entry_cli.py
 !build/entry_gui.py
 dist/
+dist_テスト/
 
 # Virtual environments
 .venv
