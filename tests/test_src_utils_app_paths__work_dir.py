@@ -54,13 +54,18 @@ def test_edge_01():
             pr_mock.assert_called_once()
 
 
-def test_edge_02():
+def test_edge_02(tmp_path):
     """
-    input: frozen exe 実行中（sys.executable = 'C:/app/app.exe'）
-    expected: Path('C:/app')（exe 同置ディレクトリの絶対パス）を返す。
+    input: frozen exe 実行中（sys.executable = tmp_path 内の 'app.exe'）
+    expected: exe 同置ディレクトリ（resolve した sys.executable の親）の絶対パスを返す。
+
+    注意: 'C:/app/app.exe' は POSIX では相対パスとして扱われるため、Linux CI では
+    resolve() がカレントディレクトリ配下に解決して失敗する。tmp_path を使って
+    プラットフォーム中立な絶対パスにする。
     """
+    executable = tmp_path / "app.exe"
     with mock.patch("src.utils.app_paths.is_frozen", return_value=True), \
-         mock.patch.object(sys, "executable", "C:/app/app.exe"):
+         mock.patch.object(sys, "executable", str(executable)):
         result = work_dir()
-        assert result == Path("C:/app")
+        assert result == executable.resolve().parent
         assert result.is_absolute()

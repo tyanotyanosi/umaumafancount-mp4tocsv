@@ -34,15 +34,21 @@ import src.utils.app_paths as app_paths
 from src.utils.app_paths import project_root
 
 
-def test_edge_01():
+def test_edge_01(tmp_path):
     """
-    input: frozen exe 実行中（sys.executable = 'C:/app/app.exe'）
-    expected: Path('C:/app') を返す（exe 同置ディレクトリの絶対パス）。
+    input: frozen exe 実行中（sys.executable = tmp_path 内の 'app.exe'）
+    expected: sys.executable を resolve した親ディレクトリを返す。
+
+    注意: 'C:/app/app.exe' のようなドライブレター付きリテラルは Windows では
+    絶対パスだが POSIX では相対パス扱いになるため、Linux CI では resolve() が
+    カレントディレクトリ配下に解決して失敗する。tmp_path を使って
+    プラットフォーム中立な絶対パスにする。
     """
+    executable = tmp_path / "app.exe"
     with mock.patch("src.utils.app_paths.is_frozen", return_value=True), \
-         mock.patch.object(sys, "executable", "C:/app/app.exe"):
+         mock.patch.object(sys, "executable", str(executable)):
         result = project_root()
-        assert result == Path("C:/app")
+        assert result == executable.resolve().parent
         assert result.is_absolute()
 
 

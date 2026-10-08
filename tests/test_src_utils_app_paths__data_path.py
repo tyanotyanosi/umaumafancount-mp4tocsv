@@ -65,12 +65,18 @@ def _bases():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_edge_01():
+def test_edge_01(tmp_path):
     """
-    input: 絶対パス（例: 'C:/abs/config.yaml'）
-    expected: Path('C:/abs/config.yaml') を存在探索せずにそのまま返す。
+    input: 絶対パス（tmp_path 由来のプラットフォーム中立な絶対パス）
+    expected: 渡された絶対パスを存在探索せずにそのまま返す。
+
+    注意: ドライブレター付きパス（'C:/abs/...'）は Windows では絶対パスだが
+    POSIX では単なる相対パスとして扱われるため、リテラルで書くと Linux CI で
+    失敗する。tmp_path から絶対パスを組み立ててプラットフォーム中立にする。
     """
-    assert data_path("C:/abs/config.yaml") == Path("C:/abs/config.yaml")
+    absolute = tmp_path / "abs" / "config.yaml"
+    assert absolute.is_absolute()  # 前提: 入力は絶対パスであること
+    assert data_path(str(absolute)) == absolute
 
 
 def test_edge_02():
